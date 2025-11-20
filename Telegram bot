@@ -1,0 +1,237 @@
+import logging
+# telegram লাইব্রেরি ব্যবহারের জন্য import করা হলো
+import telegram 
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, MessageHandler, 
+    ContextTypes, filters
+)
+
+# =================================================================
+# === ১. কনফিগারেশন: আপনার টোকেন ও আইডি সেট করা হলো (চূড়ান্ত) ===
+# =================================================================
+
+# ১. বট টোকেন: @BotFather থেকে পাওয়া আপনার টোকেন
+TOKEN = '8333558740:AAHoXqa8V0E-NAbYxbYU4y15yrBTQzr4QHc'
+
+# ২. এডমিন চ্যাট আইডি: আপনার দেওয়া আইডি (সংখ্যা)
+# এই আইডিতে ইউজারদের সব মেসেজ ফরওয়ার্ড করা হবে।
+ADMIN_CHAT_ID = 7870088579 
+
+
+# ৩. রিপ্লাই কীবোর্ড (সাধারণ মেনু বাটন): এটি ইনপুট বক্সের উপরে দেখাবে।
+REPLY_KEYBOARD = [
+    ['সার্ভিস মেনু', 'যোগাযোগ'],
+    ['এডমিনকে বলুন', 'মূল মেনু'],
+]
+# রিপ্লাই কীবোর্ডের টেক্সটকে ফাংশনাল মেনু আইডিতে ম্যাপ করা।
+REPLY_KEYBOARD_MAP = {
+    '/start': 'main_menu',
+    'মূল মেনু': 'main_menu',
+    'সার্ভিস মেনু': 'services_menu',
+    'যোগাযোগ': 'contact_info'
+}
+
+
+# =================================================================
+# === ২. ডাইনামিক মেনু ডেটা (MENU_DATA) ===
+# *** প্রধান মেনুতে নতুন 'Review Generator' বাটন যোগ করা হলো ***
+# =================================================================
+MENU_DATA = {
+    'main_menu': {
+        'message': '👋 স্বাগতম! এটি আমাদের প্রধান মেনু। নিচের যেকোনো বাটনে ক্লিক করুন:',
+        # 'buttons' এর ভেতরের প্রতিটি লিস্ট একটি রো (Row) নির্দেশ করে।
+        'buttons': [
+            # 🚨 নতুন, লাল রঙের প্রিমিয়াম বাটনটি সবার উপরে যোগ করা হলো
+            [{'text': '🔴 REVIEW GENERATOR', 'url': 'https://sites.google.com/view/review-generator/home'}],
+            
+            # প্রথম রো: দুটি সাধারণ বাটন
+            [{'text': 'আমাদের সার্ভিসসমূহ', 'data': 'services_menu'}, {'text': 'যোগাযোগের তথ্য', 'data': 'contact_info'}],
+            
+            # দ্বিতীয় রো: একটি সাধারণ URL বাটন
+            [{'text': 'আমাদের ওয়েবসাইট', 'url': 'https://www.google.com'}],
+        ]
+    },
+    'services_menu': {
+        'message': '**সার্ভিস মেনু**\nআপনি আমাদের সার্ভিস দেখতে ইনলাইন বাটন ব্যবহার করুন:',
+        'buttons': [
+            [{'text': 'সার্ভিস A ডিটেইলস', 'data': 'service_a_content'}],
+            [{'text': 'সার্ভিস B ডিটেইলস', 'data': 'service_b_content'}],
+            [{'text': '↩️ প্রধান মেনুতে ফিরুন', 'data': 'main_menu'}],
+        ]
+    },
+    'contact_info': {
+        'message': "আমাদের সাথে যোগাযোগ করতে নিম্নলিখিত তথ্য ব্যবহার করুন:\n\n*Admin telegram:* @AfMdshakil\n*Telegram number:* +8801XXXXXXXXX",
+        'buttons': [
+            [{'text': '↩️ প্রধান মেনুতে ফিরুন', 'data': 'main_menu'}],
+        ]
+    },
+    'service_a_content': {
+        'message': "**সার্ভিস A ডিটেইলস**\nএটি একটি প্রিমিয়াম সার্ভিস। আমরা যা যা করে থাকি:\n* ফিচার ১\n* ফিচার ২\n* ফিচার ৩",
+        'buttons': [
+            [{'text': '🔙 সার্ভিস মেনু', 'data': 'services_menu'}],
+        ]
+    },
+    # আপনি এই ডিকশনারিতে যখন খুশি নতুন মেনু বা কন্টেন্ট যোগ করতে পারবেন।
+}
+
+
+# বেসিক লগিং সেটআপ
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# --- ৩. বাটন তৈরির ইউটিলিটি ফাংশন ---
+
+def get_menu_markup(menu_id: str) -> InlineKeyboardMarkup:
+    """MENU_DATA থেকে ইনলাইন বাটন তৈরি করে।"""
+    menu = MENU_DATA.get(menu_id)
+    if not menu or 'buttons' not in menu:
+        return InlineKeyboardMarkup([])
+    
+    keyboard = []
+    for row in menu['buttons']:
+        row_buttons = []
+        for btn in row:
+            if 'url' in btn:
+                row_buttons.append(InlineKeyboardButton(btn['text'], url=btn['url']))
+            elif 'data' in btn:
+                row_buttons.append(InlineKeyboardButton(btn['text'], callback_data=btn['data']))
+        if row_buttons:
+            keyboard.append(row_buttons)
+            
+    return InlineKeyboardMarkup(keyboard)
+
+def get_reply_markup() -> telegram.ReplyKeyboardMarkup:
+    """রিপ্লাই কীবোর্ড তৈরি করে।"""
+    # রিপ্লাই কীবোর্ড সবসময় দেখানোর জন্য one_time_keyboard=False রাখা হয়েছে
+    return telegram.ReplyKeyboardMarkup(REPLY_KEYBOARD, resize_keyboard=True, one_time_keyboard=False)
+
+
+# --- ৪. কমান্ড হ্যান্ডলার ফাংশন ---
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/start কমান্ডের জন্য রেসপন্স তৈরি করে এবং প্রধান মেনু দেখায়।"""
+    user = update.effective_user
+    
+    menu_id = 'main_menu'
+    message_text = MENU_DATA[menu_id]['message']
+    
+    reply_markup = get_reply_markup() # রিপ্লাই কীবোর্ড
+    
+    # স্বাগত বার্তা এবং মেনু দেখানো
+    await update.message.reply_html(
+        f"হাই {user.mention_html()}! {message_text}",
+        reply_markup=reply_markup, 
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+# --- ৫. মেসেজ এবং কাস্টম কমান্ড হ্যান্ডলার ---
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """ইউজারদের টেক্সট মেসেজ ও রিপ্লাই কীবোর্ড কমান্ড হ্যান্ডেল করে।"""
+    message_text = update.message.text.strip()
+    
+    # রিপ্লাই কীবোর্ডের মাধ্যমে আসা টেক্সট কমান্ড ম্যাপ করা
+    target_menu_id = REPLY_KEYBOARD_MAP.get(message_text)
+    
+    if target_menu_id:
+        # এটি একটি ডাইনামিক মেনু কমান্ড (যেমন: 'মূল মেনু', 'সার্ভিস মেনু')
+        menu_item = MENU_DATA.get(target_menu_id)
+        if menu_item:
+            message_text = menu_item.get('message', 'কোনো বার্তা সেট করা হয়নি।')
+            inline_markup = get_menu_markup(target_menu_id)
+            
+            await update.message.reply_text(
+                text=message_text,
+                reply_markup=inline_markup, # টেক্সট কমান্ডের পর ইনলাইন বাটন দেখাবে
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+    
+    # যদি কোনো কমান্ড ম্যাপ না হয় বা ইউজার নিজে টাইপ করে, তবে ফরওয়ার্ডিং করা হবে।
+    await forward_to_admin(update, context)
+
+
+async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """এডমিনকে ইউজারদের মেসেজ ফরওয়ার্ড করে।"""
+    if ADMIN_CHAT_ID and isinstance(ADMIN_CHAT_ID, int):
+        user = update.effective_user
+        
+        # এডমিনের কাছে ফরওয়ার্ড করার জন্য মেসেজ তৈরি
+        forward_message = (
+            f"📥 **নতুন মেসেজ!**\n"
+            f"👤 **ব্যবহারকারী:** {user.full_name} (@{user.username or 'N/A'}) (ID: `{user.id}`)\n"
+            f"💬 **মেসেজ:** {update.message.text}"
+        )
+        
+        # এডমিনের চ্যাটে মেসেজ পাঠানো
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=forward_message,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            # ব্যবহারকারীকে নিশ্চিত বার্তা দেওয়া
+            await update.message.reply_text("আপনার বার্তাটি এডমিনের কাছে পাঠানো হয়েছে। তিনি শীঘ্রই উত্তর দেবেন। ধন্যবাদ!")
+        except Exception as e:
+             await update.message.reply_text("দুঃখিত, এডমিনকে বার্তা পাঠানো সম্ভব হয়নি। কনফিগারেশন ত্রুটি।")
+             logger.error(f"Failed to forward message to admin: {e}")
+    else:
+        await update.message.reply_text("এডমিন ফরওয়ার্ডিং সেট আপ করা নেই। এডমিন আইডি (সংখ্যা) সঠিকভাবে কনফিগার করুন।")
+
+
+# --- ৬. ইনলাইন বাটন হ্যান্ডলার ---
+
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """ইনলাইন বাটনে ক্লিক করার পর এই ফাংশনটি কল করা হয়।"""
+    query = update.callback_query
+    await query.answer() # লোডিং আইকন বন্ধ করতে
+
+    menu_id = query.data
+    
+    # ডেটাবেস থেকে মেনু/কন্টেন্ট লোড করা
+    menu_item = MENU_DATA.get(menu_id)
+    
+    if not menu_item:
+        await query.edit_message_text(text="এই মেনু আইটেমটি খুঁজে পাওয়া যায়নি বা মেয়াদ উত্তীর্ণ।")
+        return
+
+    # নতুন মেনু বা কন্টেন্ট প্রদর্শন করা
+    message_text = menu_item.get('message', 'কোনো বার্তা সেট করা হয়নি।')
+    
+    # নতুন ইনলাইন বাটন তৈরি করা
+    new_inline_markup = get_menu_markup(menu_id)
+    
+    # মেসেজটি এডিট করে নতুন মেনু/কন্টেন্ট দেখানো
+    await query.edit_message_text(
+        text=message_text,
+        reply_markup=new_inline_markup,
+        parse_mode=ParseMode.MARKDOWN 
+    )
+
+
+# --- ৭. প্রধান ফাংশন (বট চালু করার জন্য) ---
+
+def main() -> None:
+    """বট চালানোর জন্য প্রধান ফাংশন।"""
+    # Bot Application তৈরি করা
+    application = Application.builder().token(TOKEN).build()
+
+    # কমান্ড হ্যান্ডলার যোগ করা
+    application.add_handler(CommandHandler("start", start))
+    
+    # ইনলাইন বাটন ক্লিক হ্যান্ডলার যোগ করা
+    application.add_handler(CallbackQueryHandler(button_callback))
+    
+    # টেক্সট মেসেজ হ্যান্ডলার যোগ করা (কমান্ড ছাড়া সব টেক্সট handle_message ফাংশনে যাবে)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    # বট শুরু করা (পুলিং মোডে)
+    logger.info("বট শুরু করা হচ্ছে...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
