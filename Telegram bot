@@ -1,10 +1,10 @@
 import logging
-# telegram লাইব্রেরি ব্যবহারের জন্য import করা হলো
-import telegram 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ParseMode
+import json
+import time
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, ParseMode
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, 
-    ContextTypes, filters
+    ContextTypes, filters, ConversationHandler
 )
 
 # =================================================================
@@ -15,53 +15,78 @@ from telegram.ext import (
 TOKEN = '8333558740:AAHoXqa8V0E-NAbYxbYU4y15yrBTQzr4QHc'
 
 # ২. এডমিন চ্যাট আইডি: আপনার দেওয়া আইডি (সংখ্যা)
-# এই আইডিতে ইউজারদের সব মেসেজ ফরওয়ার্ড করা হবে।
 ADMIN_CHAT_ID = 7870088579 
 
+# ৩. এডমিন ইউজারনেম (ইউজারকে বলার জন্য):
+ADMIN_USERNAME = 'AfMdshakil'
 
-# ৩. রিপ্লাই কীবোর্ড (সাধারণ মেনু বাটন): এটি ইনপুট বক্সের উপরে দেখাবে।
-REPLY_KEYBOARD = [
-    ['সার্ভিস মেনু', 'যোগাযোগ'],
-    ['এডমিনকে বলুন', 'মূল মেনু'],
+# ৪. রেফারেল বোনাস: প্রত্যেক সফল রেফারেলের জন্য 0.50 টাকা
+REFERRAL_BONUS = 0.50
+
+# =================================================================
+# === ২. স্টেট এবং ডাটাবেস সিমুলেশন (সতর্কতা সহ) ===
+# =================================================================
+
+# কনভারসেশন স্টেটস
+WORK_SUBMISSION = range(1)
+WITHDRAW_STATE, WITHDRAW_AMOUNT, WITHDRAW_METHOD = range(3)
+
+# ⚠️⚠️⚠️ সতর্কবার্তা: এটি একটি সাধারণ পাইথন ডিকশনারি। বট রিস্টার্ট হলে ডেটা হারিয়ে যাবে।
+# বাস্তব কাজের জন্য এটিকে একটি স্থায়ী ডাটাবেস (যেমন Firebase, PostgreSQL) দিয়ে প্রতিস্থাপন করুন।
+user_data_db = {}
+
+
+# =================================================================
+# === ৩. মেনু ডেটা (সকল লিংক ও তথ্য এখানে সেট করা হলো) ===
+# =================================================================
+
+# মেইন রিপ্লাই কীবোর্ড বাটন (৫টি মেইন অপশন)
+REPLY_KEYBOARD_BUTTONS = [
+    ['🔴 Review Generator'], 
+    ['📜 তথ্য দেখুন', '💼 কাজ দেখুন'],  
+    ['💵 উত্তোলন', '✅ কাজ জমা দিন'], 
 ]
-# রিপ্লাই কীবোর্ডের টেক্সটকে ফাংশনাল মেনু আইডিতে ম্যাপ করা।
-REPLY_KEYBOARD_MAP = {
-    '/start': 'main_menu',
-    'মূল মেনু': 'main_menu',
-    'সার্ভিস মেনু': 'services_menu',
-    'যোগাযোগ': 'contact_info'
-}
+REPLY_MARKUP = ReplyKeyboardMarkup(REPLY_KEYBOARD_BUTTONS, resize_keyboard=True, one_time_keyboard=False)
 
-
-# =================================================================
-# === ২. ডাইনামিক মেনু ডেটা (MENU_DATA) ===
-# *** প্রধান মেনুতে নতুন 'Review Generator' বাটন যোগ করা হলো ***
-# =================================================================
+# ডাইনামিক মেনু ডেটা 
 MENU_DATA = {
     'main_menu': {
-        'message': '👋 আসসালামু আলাইকুম রাহমাতুল্লাহ স্বাগতম! আপনি আমাদের বটে এসেছেন বলে আমরা খুশি হয়েছি:',
-        # 'buttons' এর ভেতরের প্রতিটি লিস্ট একটি রো (Row) নির্দেশ করে।
+        'message': '👋 স্বাগতম! এটি আমাদের প্রধান মেনু। নিচের যেকোনো বাটনে ক্লিক করুন:',
         'buttons': [
-            # 🚨 নতুন, লাল রঙের প্রিমিয়াম বাটনটি সবার উপরে যোগ করা হলো
-            [{'text': '🔴 REVIEW GENERATOR', 'url': 'https://sites.google.com/view/review-generator/home'}],
+            [{'text': '🔴 REVIEW GENERATOR', 'url': 'https://sites.google.com/view/review-generator/home'}], # ✅ Review Generator Link Set
             
-            # প্রথম রো: দুটি সাধারণ বাটন
             [{'text': 'আমাদের সার্ভিসসমূহ', 'data': 'services_menu'}, {'text': 'যোগাযোগের তথ্য', 'data': 'contact_info'}],
-            
-            # দ্বিতীয় রো: একটি সাধারণ URL বাটন
-            [{'text': 'আমাদের ওয়েবসাইট', 'url': 'https://www.google.com'}],
+            [{'text': 'আমাদের ওয়েবসাইট', 'url': 'http://brotheritltd.com'}], # ✅ Website Link Set
         ]
     },
-    'services_menu': {
-        'message': '**সার্ভিস মেনু**\nআপনি আমাদের সার্ভিস দেখতে ইনলাইন বাটন ব্যবহার করুন:',
+    
+    # 📜 তথ্য দেখুন (Info Menu)
+    'info_menu': {
+        'message': '📜 **তথ্য দেখুন মেনু**\n\nআপনি আমাদের গুরুত্বপূর্ণ লিংক এবং আপনার ব্যালেন্স চেক করতে পারবেন:',
         'buttons': [
-            [{'text': 'সার্ভিস A ডিটেইলস', 'data': 'service_a_content'}],
-            [{'text': 'সার্ভিস B ডিটেইলস', 'data': 'service_b_content'}],
-            [{'text': '↩️ প্রধান মেনুতে ফিরুন', 'data': 'main_menu'}],
+            [{'text': 'ইউটিউব চ্যানেল 📺', 'url': 'https://youtube.com/@af.mdshakil?si=QoHvBxpnY4-laCQi'}], # ✅ YouTube Link Set
+            [{'text': 'ফেসবুক গ্রুপ 👥', 'url': 'https://www.facebook.com/groups/1853319645292519/?ref=share&mibextid=NSMWBT'}], # ✅ Facebook Group Link Set
+            [{'text': 'ফেসবুক পেজ 👍', 'url': 'https://www.facebook.com/share/1BX4LQfrq9/'}], # ✅ Facebook Page Link Set
+            [{'text': '💰 আমার ব্যালেন্স দেখুন', 'data': 'check_balance'}],
+            [{'text': '↩️ প্রধান মেনু', 'data': 'main_menu'}],
         ]
     },
+    
+    # 💼 কাজ দেখুন (Work Menu)
+    'work_menu': {
+        'message': '💼 **কাজ দেখুন মেনু**\n\nকাজের জন্য প্রয়োজনীয় প্ল্যাটফর্ম এবং রেফারেল লিংক এখান থেকে পাবেন:',
+        'buttons': [
+            [{'text': 'টেলিগ্রাম গ্রুপ 💬', 'url': 'https://t.me/Skyzone_IT_chat'}], # ✅ Telegram Group Link Set
+            [{'text': 'টেলিগ্রাম চ্যানেল 📢', 'url': 'https://t.me/Skyzone_IT'}], # ✅ Telegram Channel Link Set
+            [{'text': 'পেমেন্ট প্রমাণ 🧾', 'url': 'https://t.me/brotheritltd'}], # ✅ Payment Proof Link Set
+            [{'text': '🔗 আমার রেফারেল লিংক', 'data': 'get_referral_link'}],
+            [{'text': '↩️ প্রধান মেনু', 'data': 'main_menu'}],
+        ]
+    },
+    
     'contact_info': {
-        'message': "আমাদের সাথে যোগাযোগ করতে নিম্নলিখিত তথ্য ব্যবহার করুন:\n\n*Admin telegram:* @AfMdshakil\n*Telegram number:* +8801XXXXXXXXX",
+        # ✅ Email, Website, Admin Username Set
+        'message': f"আমাদের সাথে যোগাযোগ করতে নিম্নলিখিত তথ্য ব্যবহার করুন:\n\n*ইমেইল:* raihan@brotheritltd.com\n*ওয়েবসাইট:* brotheritltd.com\n*এডমিন ইউজারনেম:* @{ADMIN_USERNAME}",
         'buttons': [
             [{'text': '↩️ প্রধান মেনুতে ফিরুন', 'data': 'main_menu'}],
         ]
@@ -72,27 +97,89 @@ MENU_DATA = {
             [{'text': '🔙 সার্ভিস মেনু', 'data': 'services_menu'}],
         ]
     },
-    # আপনি এই ডিকশনারিতে যখন খুশি নতুন মেনু বা কন্টেন্ট যোগ করতে পারবেন।
 }
 
+# উত্তোলনের মাধ্যম
+WITHDRAWAL_OPTIONS = ['Bkash', 'Nagad', 'Binance']
 
-# বেসিক লগিং সেটআপ
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+
+# =================================================================
+# === ৪. লগিং এবং ডাটাবেস ইউটিলিটি ===
+# =================================================================
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- ৩. বাটন তৈরির ইউটিলিটি ফাংশন ---
+def get_user_data(user_id):
+    """ইউজারের ব্যালেন্স সহ সকল ডাটা রিটার্ন করে। নতুন ইউজার হলে ডাটা ইনিশিয়ালাইজ করে।"""
+    if user_id not in user_data_db:
+        # নতুন ইউজারের জন্য ইনিশিয়ালাইজ
+        user_data_db[user_id] = {
+            'full_name': None, 
+            'balance': 0.00, 
+            'total_earned': 0.00,
+            'referred_by': None,
+            'referral_count': 0
+        }
+    return user_data_db[user_id]
 
-def get_menu_markup(menu_id: str) -> InlineKeyboardMarkup:
-    """MENU_DATA থেকে ইনলাইন বাটন তৈরি করে।"""
-    menu = MENU_DATA.get(menu_id)
-    if not menu or 'buttons' not in menu:
-        return InlineKeyboardMarkup([])
+# =================================================================
+# === ৫. কমান্ড এবং মেইন হ্যান্ডলার ===
+# =================================================================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """/start কমান্ড হ্যান্ডেল করে এবং প্রথমবার ইউজারকে ইসলামিক সালাম দেয়।"""
+    user = update.effective_user
+    user_id = user.id
+    is_new_user = user_id not in user_data_db
+    
+    # ডাটা ইনিশিয়ালাইজ/সংগ্রহ
+    user_data = get_user_data(user_id)
+    if user_data['full_name'] is None:
+        user_data['full_name'] = user.full_name
+        
+    # রেফেলার ট্র্যাকিং
+    if context.args and is_new_user:
+        try:
+            referrer_id = int(context.args[0].replace('ref_', ''))
+            if referrer_id != user_id and referrer_id in user_data_db:
+                user_data['referred_by'] = referrer_id
+                referrer_data = get_user_data(referrer_id)
+                referrer_data['referral_count'] += 1
+                referrer_data['balance'] += REFERRAL_BONUS
+                
+                await context.bot.send_message(
+                    chat_id=referrer_id,
+                    text=f"🎉 **অভিনন্দন!**\nআপনার রেফারেল লিংক ব্যবহার করে **{user.full_name}** বটটি ব্যবহার শুরু করেছেন।\nআপনার অ্যাকাউন্টে **৳{REFERRAL_BONUS:.2f}** যোগ করা হয়েছে।\nবর্তমান ব্যালেন্স: **৳{referrer_data['balance']:.2f}**"
+                )
+                logger.info(f"User {user_id} referred by {referrer_id}. Balance updated.")
+        except Exception as e:
+            logger.error(f"Referral parsing error: {e}")
+            
+    # ৪. প্রথমবার ইউজারকে ইসলামিক সালাম
+    greeting_message = (
+        f"﷽\n\n"
+        f"প্রিয় {user.full_name}، **আসসালামু আলাইকুম ওয়া রাহমাতুল্লাহি ওয়া বারাকাতুহ!**\n\n"
+        f"আমাদের বটটিতে স্বাগতম। আপনি নিচে দেওয়া অপশনগুলো ব্যবহার করে সহজেই কাজ শুরু করতে পারেন।"
+    )
+    
+    await update.message.reply_text(greeting_message, reply_markup=REPLY_MARKUP, parse_mode=ParseMode.MARKDOWN)
+    
+    # যদি ইউজার /start কমান্ড দেয়, তবে main_menu-এর বাটনগুলোও দেখাবে।
+    await handle_dynamic_menu(update, context, 'main_menu')
+    
+    return ConversationHandler.END
+
+
+async def handle_dynamic_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, menu_id: str) -> None:
+    """ডাইনামিক মেনু এবং কন্টেন্ট প্রদর্শন করে।"""
+    menu_item = MENU_DATA.get(menu_id)
+    if not menu_item:
+        return
+        
+    message_text = menu_item.get('message', 'কোনো বার্তা সেট করা হয়নি।')
     
     keyboard = []
-    for row in menu['buttons']:
+    for row in menu_item.get('buttons', []):
         row_buttons = []
         for btn in row:
             if 'url' in btn:
@@ -102,61 +189,86 @@ def get_menu_markup(menu_id: str) -> InlineKeyboardMarkup:
         if row_buttons:
             keyboard.append(row_buttons)
             
-    return InlineKeyboardMarkup(keyboard)
+    inline_markup = InlineKeyboardMarkup(keyboard)
 
-def get_reply_markup() -> telegram.ReplyKeyboardMarkup:
-    """রিপ্লাই কীবোর্ড তৈরি করে।"""
-    # রিপ্লাই কীবোর্ড সবসময় দেখানোর জন্য one_time_keyboard=False রাখা হয়েছে
-    return telegram.ReplyKeyboardMarkup(REPLY_KEYBOARD, resize_keyboard=True, one_time_keyboard=False)
+    # 1. সকল অপশন এডমিন edit করতে যেন পারে (নতুন মেসেজ পাঠানো হচ্ছে)
+    if update.callback_query:
+        await update.callback_query.message.reply_text(
+            text=message_text,
+            reply_markup=inline_markup,
+            parse_mode=ParseMode.MARKDOWN 
+        )
+    else:
+        await update.message.reply_text(
+            text=message_text,
+            reply_markup=inline_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
 
+# =================================================================
+# === ৬. সাধারণ মেসেজ এবং ফরওয়ার্ডিং হ্যান্ডলার ===
+# =================================================================
 
-# --- ৪. কমান্ড হ্যান্ডলার ফাংশন ---
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/start কমান্ডের জন্য রেসপন্স তৈরি করে এবং প্রধান মেনু দেখায়।"""
-    user = update.effective_user
-    
-    menu_id = 'main_menu'
-    message_text = MENU_DATA[menu_id]['message']
-    
-    reply_markup = get_reply_markup() # রিপ্লাই কীবোর্ড
-    
-    # স্বাগত বার্তা এবং মেনু দেখানো
-    await update.message.reply_html(
-        f"হাই {user.mention_html()}! {message_text}",
-        reply_markup=reply_markup, 
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-# --- ৫. মেসেজ এবং কাস্টম কমান্ড হ্যান্ডলার ---
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """ইউজারদের টেক্সট মেসেজ ও রিপ্লাই কীবোর্ড কমান্ড হ্যান্ডেল করে।"""
+async def handle_text_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """রিপ্লাই কীবোর্ড বাটনগুলো হ্যান্ডেল করে।"""
     message_text = update.message.text.strip()
     
-    # রিপ্লাই কীবোর্ডের মাধ্যমে আসা টেক্সট কমান্ড ম্যাপ করা
-    target_menu_id = REPLY_KEYBOARD_MAP.get(message_text)
+    if message_text == '🔴 Review Generator':
+        # ১. Review Generator (URL)
+        url = MENU_DATA['main_menu']['buttons'][0][0]['url']
+        keyboard = [[InlineKeyboardButton("🔴 Review Generator (লিংক)", url=url)]]
+        await update.message.reply_text("আপনার কাঙ্ক্ষিত **Review Generator** বাটনে ক্লিক করুন:", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+        
+    elif message_text == '📜 তথ্য দেখুন':
+        # ২. তথ্য দেখুন মেনু
+        await handle_dynamic_menu(update, context, 'info_menu')
+        return
+
+    elif message_text == '💼 কাজ দেখুন':
+        # ৩. কাজ দেখুন মেনু
+        await handle_dynamic_menu(update, context, 'work_menu')
+        return
+        
+    elif message_text == '💵 উত্তোলন':
+        # ৪. উত্তোলন কনভারসেশন শুরু
+        await start_withdraw(update, context)
+        return
+
+    elif message_text == '✅ কাজ জমা দিন':
+        # ৫. কাজ জমা দিন কনভারসেশন শুরু
+        await start_work_submission(update, context)
+        return
     
-    if target_menu_id:
-        # এটি একটি ডাইনামিক মেনু কমান্ড (যেমন: 'মূল মেনু', 'সার্ভিস মেনু')
-        menu_item = MENU_DATA.get(target_menu_id)
-        if menu_item:
-            message_text = menu_item.get('message', 'কোনো বার্তা সেট করা হয়নি।')
-            inline_markup = get_menu_markup(target_menu_id)
-            
-            await update.message.reply_text(
-                text=message_text,
-                reply_markup=inline_markup, # টেক্সট কমান্ডের পর ইনলাইন বাটন দেখাবে
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-    
-    # যদি কোনো কমান্ড ম্যাপ না হয় বা ইউজার নিজে টাইপ করে, তবে ফরওয়ার্ডিং করা হবে।
+    # ❌ প্রধান মেনু বাটনটি সরানো হয়েছে, কারণ /start বাটন দিয়ে শুরু করা হয়।
+
+    # ২. যেকোনো ইউজার সকল কিছু যেন এডমিনের কাছে পাঠাতে পারে (টেক্সট মেসেজ ফরওয়ার্ডিং)
     await forward_to_admin(update, context)
 
 
+async def handle_media_messages(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """স্ক্রীনশট, ভয়েস, ছবি, ডকুমেন্ট সহ সকল মিডিয়া এডমিনকে ফরওয়ার্ড করে।"""
+    user = update.effective_user
+    
+    # ২. যেকোনো ইউজার সকল কিছু যেন এডমিনের কাছে পাঠাতে পারে (মিডিয়া ফরওয়ার্ডিং)
+    caption = f"📥 **নতুন মিডিয়া মেসেজ!**\n👤 **ব্যবহারকারী:** {user.full_name} (ID: `{user.id}`)\n💬 **ক্যাপশন/বার্তা:** {update.message.caption or 'N/A'}"
+    
+    # Admin-কে ব্যবহারকারীর মূল মেসেজটি ফরওয়ার্ড করা
+    await context.bot.forward_message(chat_id=ADMIN_CHAT_ID, from_chat_id=update.effective_chat.id, message_id=update.message.message_id)
+    
+    # ফরওয়ার্ডেড মেসেজের উপরে একটি ক্যাপশন পাঠানো যাতে বোঝা যায় কার মেসেজ
+    await context.bot.send_message(
+        chat_id=ADMIN_CHAT_ID,
+        text=caption,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    # ব্যবহারকারীকে নিশ্চিত বার্তা দেওয়া
+    await update.message.reply_text("আপনার মিডিয়া ফাইলটি এডমিনের কাছে পাঠানো হয়েছে। তিনি শীঘ্রই উত্তর দেবেন। ধন্যবাদ!")
+
+
 async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """এডমিনকে ইউজারদের মেসেজ ফরওয়ার্ড করে।"""
+    """এডমিনকে ইউজারদের টেক্সট মেসেজ ফরওয়ার্ড করে।"""
     if ADMIN_CHAT_ID and isinstance(ADMIN_CHAT_ID, int):
         user = update.effective_user
         
@@ -183,51 +295,375 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("এডমিন ফরওয়ার্ডিং সেট আপ করা নেই। এডমিন আইডি (সংখ্যা) সঠিকভাবে কনফিগার করুন।")
 
 
-# --- ৬. ইনলাইন বাটন হ্যান্ডলার ---
+# =================================================================
+# === ৭. ইনলাইন বাটন হ্যান্ডলার (Feature Logic) ===
+# =================================================================
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """ইনলাইন বাটনে ক্লিক করার পর এই ফাংশনটি কল করা হয়।"""
     query = update.callback_query
-    await query.answer() # লোডিং আইকন বন্ধ করতে
+    await query.answer() 
 
-    menu_id = query.data
-    
-    # ডেটাবেস থেকে মেনু/কন্টেন্ট লোড করা
-    menu_item = MENU_DATA.get(menu_id)
-    
-    if not menu_item:
-        await query.edit_message_text(text="এই মেনু আইটেমটি খুঁজে পাওয়া যায়নি বা মেয়াদ উত্তীর্ণ।")
+    data = query.data
+    user_id = query.from_user.id
+    user_data = get_user_data(user_id)
+
+    if data == 'main_menu':
+        # ↩️ প্রধান মেনুতে ফেরা
+        await handle_dynamic_menu(query, context, 'main_menu')
         return
 
-    # নতুন মেনু বা কন্টেন্ট প্রদর্শন করা
-    message_text = menu_item.get('message', 'কোনো বার্তা সেট করা হয়নি।')
-    
-    # নতুন ইনলাইন বাটন তৈরি করা
-    new_inline_markup = get_menu_markup(menu_id)
-    
-    # মেসেজটি এডিট করে নতুন মেনু/কন্টেন্ট দেখানো
-    await query.edit_message_text(
-        text=message_text,
-        reply_markup=new_inline_markup,
-        parse_mode=ParseMode.MARKDOWN 
+    elif data == 'check_balance':
+        # ৪. ব্যালেন্স দেখার জন্য
+        message = (
+            f"💰 **আপনার বর্তমান ব্যালেন্স**\n"
+            f"ইউজার আইডি: `{user_id}`\n"
+            f"বর্তমান ব্যালেন্স: **৳{user_data['balance']:.2f}**\n"
+            f"মোট আয়: **৳{user_data['total_earned']:.2f}**"
+        )
+        await query.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    elif data == 'get_referral_link':
+        # ৪. রেফার লিংক
+        referral_link = f"https://t.me/{context.bot.username}?start=ref_{user_id}"
+        message = (
+            f"🔗 **আপনার রেফারেল লিংক**\n\n"
+            f"এই লিংকটি শেয়ার করুন এবং যখন কেউ আপনার লিংক ব্যবহার করে বটে যোগ দেবে, আপনি পাবেন **৳{REFERRAL_BONUS:.2f}**।\n\n"
+            f"আপনার লিংক: `{referral_link}`\n"
+            f"আপনার রেফারেল সংখ্যা: **{user_data['referral_count']}** জন।"
+        )
+        keyboard = [[InlineKeyboardButton("🔗 লিংক কপি করুন", url=f"https://t.me/{context.bot.username}?start=ref_{user_id}")] ]
+        await query.message.reply_text(message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+        return
+
+    elif data in MENU_DATA:
+        # মেনু নেভিগেশন (তথ্য দেখুন, কাজ দেখুন, ইত্যাদি)
+        await handle_dynamic_menu(query, context, data)
+        return
+        
+    else:
+        # যেহেতু এডিট হচ্ছে না, তাই মেসেজ এডিট না করে নতুন মেসেজ দেওয়া
+        await query.message.reply_text(text="এই মেনু আইটেমটি খুঁজে পাওয়া যায়নি বা মেয়াদ উত্তীর্ণ।")
+        return
+
+
+# =================================================================
+# === ৮. কাজ সাবমিশন কনভারসেশন (ConversationHandler) ===
+# =================================================================
+
+async def start_work_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """কাজ জমা দেওয়ার প্রক্রিয়া শুরু করে।"""
+    context.user_data['submission'] = {}
+    await update.message.reply_text(
+        "✅ **কাজ জমা দিন**\n\nপ্রথমে আপনার **স্ক্রীনশটটি** মেসেজ হিসেবে পাঠিয়ে দিন।",
+        reply_markup=ReplyKeyboardRemove() # রিপ্লাই কীবোর্ড লুকানো
     )
+    return WORK_SUBMISSION
+
+async def work_submission_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """কাজ জমা দেওয়ার মাল্টি-স্টেপ প্রসেস হ্যান্ডেল করে।"""
+    submission_data = context.user_data.get('submission', {})
+    message = update.message
+    
+    # ১. স্ক্রীনশট (Photo)
+    if 'screenshot' not in submission_data and (message.photo or message.document):
+        # ছবি বা ডকুমেন্ট গ্রহণ করা
+        submission_data['screenshot_msg_id'] = message.message_id
+        submission_data['chat_id'] = message.chat_id
+        await message.reply_text("দারুণ! এবার আপনার **ইমেইল অ্যাড্রেসটি** টাইপ করে পাঠান।")
+        context.user_data['submission'] = submission_data
+        return WORK_SUBMISSION
+        
+    # ২. ইমেইল অ্যাড্রেস
+    elif 'email' not in submission_data and message.text:
+        submission_data['email'] = message.text.strip()
+        await message.reply_text("ধন্যবাদ। এবার **রিভিউ নাম (Review Name)** টাইপ করে পাঠান।")
+        context.user_data['submission'] = submission_data
+        return WORK_SUBMISSION
+        
+    # ৩. রিভিউ নাম
+    elif 'review_name' not in submission_data and message.text:
+        submission_data['review_name'] = message.text.strip()
+        await message.reply_text("প্রায় শেষ! এখন আপনার **ডিভাইস নাম (Device Name)** টাইপ করে পাঠান।")
+        context.user_data['submission'] = submission_data
+        return WORK_SUBMISSION
+
+    # ৪. ডিভাইস নাম ও ফাইনাল সাবমিট
+    elif 'device_name' not in submission_data and message.text:
+        submission_data['device_name'] = message.text.strip()
+        submission_data['user_id'] = message.from_user.id
+        submission_data['timestamp'] = time.ctime()
+        
+        # এডমিনের জন্য ফাইনাল মেসেজ তৈরি
+        final_message_for_admin = (
+            f"🚨 **নতুন কাজের জমা (New Work Submission)** 🚨\n"
+            f"👤 **ইউজার:** {message.from_user.full_name} (ID: `{submission_data['user_id']}`)\n"
+            f"--- জমা দেওয়া তথ্য ---\n"
+            f"📧 **ইমেইল:** {submission_data['email']}\n"
+            f"🏷️ **রিভিউ নাম:** {submission_data['review_name']}\n"
+            f"📱 **ডিভাইস:** {submission_data['device_name']}\n"
+            f"⏰ **সময়:** {submission_data['timestamp']}\n"
+            f"--- **অ্যাডমিন অ্যাকশন:** ---\n"
+            f"এই কাজটি অনুমোদন করতে এই কমান্ডটি ব্যবহার করুন:\n"
+            f"`/add_balance {submission_data['user_id']} <Amount>`"
+        )
+        
+        # এডমিনের কাছে স্ক্রীনশট ফরওয়ার্ড করা
+        await context.bot.forward_message(
+            chat_id=ADMIN_CHAT_ID, 
+            from_chat_id=submission_data['chat_id'], 
+            message_id=submission_data['screenshot_msg_id']
+        )
+        
+        # এডমিনের কাছে টেক্সট ডেটা পাঠানো
+        await context.bot.send_message(
+            chat_id=ADMIN_CHAT_ID,
+            text=final_message_for_admin,
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        # ইউজারকে ফাইনাল কনফার্মেশন ও এডমিনের সাথে যোগাযোগের নির্দেশ (এডমিন ইউজারনেম সহ)
+        await message.reply_text(
+            f"🎉 **আপনার কাজ সফলভাবে জমা হয়েছে!**\n\n"
+            f"আপনার কাজ এডমিনের কাছে পাঠানো হয়েছে। এখন যদি আপনার কোনো অতিরিক্ত তথ্য দেওয়ার থাকে, তাহলে সরাসরি এডমিনের ইউজারনেম **@{ADMIN_USERNAME}** মেনশন করে এডমিনকে জানাতে পারেন অথবা অপেক্ষা করুন।\n\n"
+            f"এডমিন: **@{ADMIN_USERNAME}**",
+            reply_markup=REPLY_MARKUP # মেইন মেনু ফিরিয়ে আনা
+        )
+        
+        return ConversationHandler.END
+
+    else:
+        await message.reply_text("দুঃখিত, আমি আপনার স্ক্রীনশট বা মেসেজ বুঝতে পারিনি। প্রথমে **স্ক্রীনশট/ছবি** পাঠান, অথবা যদি ভুল করে এখানে এসে থাকেন তবে '↩️ প্রধান মেনু' বাটনে ক্লিক করুন।")
+        return WORK_SUBMISSION
 
 
-# --- ৭. প্রধান ফাংশন (বট চালু করার জন্য) ---
+# =================================================================
+# === ৯. উত্তোলন কনভারসেশন (ConversationHandler) ===
+# =================================================================
+
+async def start_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """উত্তোলন প্রক্রিয়া শুরু করে।"""
+    user_data = get_user_data(update.effective_user.id)
+    # মিনিমাম উইথড্র লিমিট (উদাহরণস্বরূপ ১০ টাকা)
+    MIN_WITHDRAW = 10.00
+    if user_data['balance'] < MIN_WITHDRAW: 
+        await update.message.reply_text("💵 **উত্তোলন সম্ভব নয়!**\n\nউত্তোলন করতে আপনার সর্বনিম্ন **৳{:.2f}** ব্যালেন্স প্রয়োজন। আপনার বর্তমান ব্যালেন্স: **৳{:.2f}**।".format(MIN_WITHDRAW, user_data['balance']))
+        return ConversationHandler.END
+        
+    context.user_data['withdraw'] = {}
+    await update.message.reply_text(
+        "💵 **উত্তোলন ফর্ম**\n\nআপনি কত টাকা উত্তোলন করতে চান? (যেমন: ৫০ বা ১০০)",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return WITHDRAW_STATE
+
+async def withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """উত্তোলনের পরিমাণ যাচাই করে।"""
+    try:
+        amount = float(update.message.text.strip())
+        user_data = get_user_data(update.effective_user.id)
+        
+        if amount > user_data['balance']:
+            await update.message.reply_text("আপনার ব্যালেন্সের চেয়ে বেশি টাকা উত্তোলন করা যাবে না। আপনার বর্তমান ব্যালেন্স: **৳{:.2f}**। সঠিক পরিমাণ দিন।".format(user_data['balance']))
+            return WITHDRAW_STATE
+        
+        if amount <= 0:
+            await update.message.reply_text("উত্তোলনের পরিমাণ শূন্য বা নেতিবাচক হতে পারে না। সঠিক পরিমাণ দিন।")
+            return WITHDRAW_STATE
+
+        context.user_data['withdraw']['amount'] = amount
+        
+        # উত্তোলনের মাধ্যম নির্বাচন
+        keyboard = [[InlineKeyboardButton(opt, callback_data=f"withdraw_{opt}")] for opt in WITHDRAWAL_OPTIONS]
+        await update.message.reply_text(
+            f"আপনি **৳{amount:.2f}** উত্তোলন করতে চান। এখন উত্তোলনের মাধ্যমটি নির্বাচন করুন:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return WITHDRAW_AMOUNT
+
+    except ValueError:
+        await update.message.reply_text("অনুগ্রহ করে শুধুমাত্র সংখ্যায় টাকার পরিমাণ দিন।")
+        return WITHDRAW_STATE
+
+async def withdraw_method_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """উত্তোলনের মাধ্যম নির্বাচন হ্যান্ডেল করে।"""
+    query = update.callback_query
+    await query.answer()
+    
+    method = query.data.split('_')[1]
+    context.user_data['withdraw']['method'] = method
+    
+    await query.edit_message_text(f"আপনি উত্তোলনের মাধ্যম হিসেবে **{method}** নির্বাচন করেছেন।\n\nএবার আপনার **{method} অ্যাকাউন্ট নম্বর/Binance ID** টাইপ করে পাঠান।")
+    return WITHDRAW_METHOD
+
+async def withdraw_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """উত্তোলনের চূড়ান্ত তথ্য সংগ্রহ ও এডমিনকে ফরওয়ার্ড করে।"""
+    account_info = update.message.text.strip()
+    withdraw_data = context.user_data['withdraw']
+    
+    withdraw_data['account_info'] = account_info
+    withdraw_data['user_id'] = update.effective_user.id
+    
+    # এডমিনের জন্য ফাইনাল মেসেজ তৈরি
+    final_message_for_admin = (
+        f"🚨 **নতুন উত্তোলন রিকোয়েস্ট** 🚨\n"
+        f"👤 **ইউজার:** {update.effective_user.full_name} (ID: `{withdraw_data['user_id']}`)\n"
+        f"💰 **পরিমাণ:** ৳{withdraw_data['amount']:.2f}\n"
+        f"💳 **মাধ্যম:** {withdraw_data['method']}\n"
+        f"🏦 **অ্যাকাউন্ট/ID:** {withdraw_data['account_info']}\n"
+        f"--- **অ্যাডমিন অ্যাকশন:** ---\n"
+        f"এই ইউজারকে পেমেন্ট করার পর তার ব্যালেন্স কমাতে এই কমান্ডটি ব্যবহার করুন:\n"
+        f"`/reduce_balance {withdraw_data['user_id']} {withdraw_data['amount']}`"
+    )
+    
+    # এডমিনের কাছে পাঠানো
+    await context.bot.send_message(
+        chat_id=ADMIN_CHAT_ID,
+        text=final_message_for_admin,
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    # ইউজারকে নিশ্চিত বার্তা
+    await update.message.reply_text(
+        f"🎉 **আপনার উত্তোলন রিকোয়েস্ট ({withdraw_data['amount']:.2f}) সফলভাবে জমা হয়েছে।**\n\n"
+        f"এডমিন শীঘ্রই আপনার তথ্য যাচাই করে পেমেন্ট প্রক্রিয়া শুরু করবেন। ধন্যবাদ!",
+        reply_markup=REPLY_MARKUP
+    )
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+async def withdraw_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """উত্তোলন প্রক্রিয়া বাতিল করে।"""
+    await update.message.reply_text("উত্তোলন প্রক্রিয়া বাতিল করা হলো।", reply_markup=REPLY_MARKUP)
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+# =================================================================
+# === ১০. এডমিন টুলস (ব্যালেন্স যোগ ও বিয়োগ) ===
+# =================================================================
+
+async def admin_add_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """৫. কাজ করে জমা যখন দিবে তাদের একাউন্টে যেন এডমিন ব্যালেন্স এড করে দিতে পারে।"""
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        return # শুধুমাত্র এডমিনের জন্য
+
+    if len(context.args) != 2:
+        await update.message.reply_text("ব্যবহারবিধি: `/add_balance <user_id> <amount>`")
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+        amount = float(context.args[1])
+        
+        user_data = get_user_data(target_user_id)
+        
+        # ৬. ইনকাম ক্যালকুলেশন
+        user_data['balance'] += amount
+        user_data['total_earned'] += amount
+        
+        await update.message.reply_text(
+            f"✅ **সফল!**\nইউজার ID: `{target_user_id}` অ্যাকাউন্টে **৳{amount:.2f}** যোগ করা হয়েছে।\nনতুন ব্যালেন্স: **৳{user_data['balance']:.2f}**"
+        )
+        
+        # ইউজারকে নোটিফিকেশন পাঠানো
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"🎉 **অভিনন্দন!** এডমিন আপনার কাজ অনুমোদন করেছেন।\nআপনার অ্যাকাউন্টে **৳{amount:.2f}** যোগ করা হয়েছে।\nবর্তমান ব্যালেন্স: **৳{user_data['balance']:.2f}**"
+            )
+        except Exception:
+            pass # যদি ইউজার বট ব্লক করে থাকে
+
+    except Exception as e:
+        await update.message.reply_text(f"ত্রুটি: কমান্ড ফরম্যাট ভুল বা ID/Amount ঠিক নয়। ত্রুটি: {e}")
+
+
+async def admin_reduce_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """উত্তোলনের পর ব্যালেন্স কমানোর জন্য এডমিন টুল।"""
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        return # শুধুমাত্র এডমিনের জন্য
+
+    if len(context.args) != 2:
+        await update.message.reply_text("ব্যবহারবিধি: `/reduce_balance <user_id> <amount>`")
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+        amount = float(context.args[1])
+        
+        user_data = get_user_data(target_user_id)
+        
+        if user_data['balance'] < amount:
+            await update.message.reply_text("⚠️ **সতর্কতা:** ইউজারের ব্যালেন্সের চেয়ে বেশি কমানো সম্ভব নয়।")
+            return
+
+        user_data['balance'] -= amount
+        
+        await update.message.reply_text(
+            f"✅ **সফল!**\nইউজার ID: `{target_user_id}` অ্যাকাউন্ট থেকে **৳{amount:.2f}** (উত্তোলনের জন্য) বিয়োগ করা হয়েছে।\nনতুন ব্যালেন্স: **৳{user_data['balance']:.2f}**"
+        )
+        
+        # ইউজারকে নোটিফিকেশন পাঠানো
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=f"💸 **আপনার পেমেন্ট সফল হয়েছে!**\nআপনার উত্তোলনকৃত **৳{amount:.2f}** আপনার নির্বাচিত মাধ্যমে পাঠানো হয়েছে।\nবর্তমান ব্যালেন্স: **৳{user_data['balance']:.2f}**"
+            )
+        except Exception:
+            pass
+
+    except Exception as e:
+        await update.message.reply_text(f"ত্রুটি: কমান্ড ফরম্যাট ভুল বা ID/Amount ঠিক নয়। ত্রুটি: {e}")
+
+
+# =================================================================
+# === ১১. প্রধান ফাংশন ও হ্যান্ডলার রেজিস্ট্রেশন ===
+# =================================================================
 
 def main() -> None:
     """বট চালানোর জন্য প্রধান ফাংশন।"""
-    # Bot Application তৈরি করা
     application = Application.builder().token(TOKEN).build()
-
-    # কমান্ড হ্যান্ডলার যোগ করা
-    application.add_handler(CommandHandler("start", start))
     
-    # ইনলাইন বাটন ক্লিক হ্যান্ডলার যোগ করা
+    # কনভারসেশন হ্যান্ডলার: কাজ জমা দিন (Work Submission)
+    work_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex('^✅ কাজ জমা দিন$'), start_work_submission)],
+        states={
+            WORK_SUBMISSION: [MessageHandler(filters.ALL, work_submission_handler)],
+        },
+        fallbacks=[MessageHandler(filters.Regex('^↩️ প্রধান মেনু$'), withdraw_cancel)],
+        allow_reentry=True
+    )
+    application.add_handler(work_conv_handler)
+    
+    # কনভারসেশন হ্যান্ডলার: উত্তোলন (Withdrawal)
+    withdraw_conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex('^💵 উত্তোলন$'), start_withdraw)],
+        states={
+            WITHDRAW_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, withdraw_amount)],
+            WITHDRAW_AMOUNT: [CallbackQueryHandler(withdraw_method_callback, pattern='^withdraw_')],
+            WITHDRAW_METHOD: [MessageHandler(filters.TEXT & ~filters.COMMAND, withdraw_submit)],
+        },
+        fallbacks=[MessageHandler(filters.Regex('^↩️ প্রধান মেনু$'), withdraw_cancel), CommandHandler('cancel', withdraw_cancel)],
+        allow_reentry=True
+    )
+    application.add_handler(withdraw_conv_handler)
+
+    # সাধারণ কমান্ড ও মেসেজ হ্যান্ডলার
+    application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_callback))
     
-    # টেক্সট মেসেজ হ্যান্ডলার যোগ করা (কমান্ড ছাড়া সব টেক্সট handle_message ফাংশনে যাবে)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # এডমিন টুলস (ব্যালেন্স ম্যানেজমেন্ট)
+    application.add_handler(CommandHandler("add_balance", admin_add_balance))
+    application.add_handler(CommandHandler("reduce_balance", admin_reduce_balance))
+    
+    # ২. মিডিয়া (ছবি, স্ক্রীনশট, ভয়েস ইত্যাদি) ফরওয়ার্ডিং হ্যান্ডলার
+    application.add_handler(MessageHandler(filters.PHOTO | filters.VOICE | filters.VIDEO | filters.DOCUMENT, handle_media_messages))
+    
+    # ২. টেক্সট মেসেজ এবং রিপ্লাই কীবোর্ড হ্যান্ডলার (কমান্ড ছাড়া)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_buttons))
 
     # বট শুরু করা (পুলিং মোডে)
     logger.info("বট শুরু করা হচ্ছে...")
