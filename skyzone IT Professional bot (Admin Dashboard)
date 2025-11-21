@@ -14,24 +14,26 @@ try:
     import firebase_admin
     from firebase_admin import credentials, firestore
 except ImportError:
+    # Replit-এ সাধারণত এই লাইব্রেরি ইনস্টল করা থাকে।
+    # যদি না থাকে তবে requirements.txt চেক করুন।
     print("⚠️ 'firebase-admin' লাইব্রেরি ইনস্টল করা নেই।")
 
 # =================================================================
 # === ১. কনফিগারেশন ===
 # =================================================================
 
-# ১. বট টোকেন
-TOKEN = '8333558740:AAHoXqa8V0E-NAbYxbYU15yrBTQzr4QHc'
+# ১. বট টোকেন (আপনার টোকেন এখানে বসান)
+TOKEN = '8333558740:AAHoXqa8V0E-NAYxbY' 
 
-# ২. সুপার এডমিন চ্যাট আইডি (ফিক্সড)
+# ২. সুপার এডমিন চ্যাট আইডি (আপনার Telegram ID)
 SUPER_ADMIN_CHAT_ID = 7870088579 
 
-# ৩. এডমিন ইউজারনেম
+# ৩. এডমিন ইউজারনেম (যোগাযোগের জন্য)
 ADMIN_USERNAME = 'AfMdshakil'
 
 # 🟢🟢🟢 ৪. ফায়ারবেস ক্রেডেনশিয়াল (এখানে আপনার JSON পেস্ট করুন) 🟢🟢🟢
 FIREBASE_CREDENTIALS_JSON = """
-{ "type": "service_account", "project_id": "PROJECT_ID", "private_key_id": "KEY_ID", "private_key": "-----BEGIN PRIVATE KEY-----\nPRIVATE_KEY\n-----END PRIVATE KEY-----\n", "client_email": "SERVICE_ACCOUNT_EMAIL", "client_id": "CLIENT_ID", "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://accounts.google.com/o/oauth2/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs", "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/SERVICE_ACCOUNT_EMAIL" }
+{ "type": "service_account", "project_id": "PROJECT_ID", "private_key_id": "KEY_ID", "private_key": "-----BEGIN PRIVATE KEY-----\nPRIVATE_KEY\n-----END PRIVATE KEY-----\n", "client_email": "SERVICE_ACCOUNT_EMAIL", "client_id": "CLIENT_ID", "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://www.googleapis.com/oauth2/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs", "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/SERVICE_ACCOUNT_EMAIL" }
 """
 # 🟢🟢🟢 পেস্ট করা শেষ হলে কোড রান করুন 🟢🟢🟢
 
@@ -44,6 +46,7 @@ db = None
 logger = logging.getLogger(__name__)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# কনফিগারেশন ডিফল্ট ভ্যালু 
 GLOBAL_CONFIG = {
     'referral_bonus': 0.50, 
     'admin_ids': [SUPER_ADMIN_CHAT_ID]
@@ -55,6 +58,7 @@ def initialize_firestore():
     if db is None:
         try:
             cred_dict = json.loads(FIREBASE_CREDENTIALS_JSON)
+            # ডামি ক্রেডেনশিয়াল চেক
             if 'project_id' in cred_dict and 'PROJECT_ID' not in cred_dict['project_id']:
                 cred = credentials.Certificate(cred_dict)
                 if not firebase_admin._apps:
@@ -62,7 +66,8 @@ def initialize_firestore():
                 db = firestore.client()
                 logger.info("✅ Firestore সফলভাবে সংযুক্ত হয়েছে।")
             else:
-                logger.error("❌ ত্রুটি: JSON ক্রেডেনশিয়াল পেস্ট করা হয়নি!")
+                logger.error("❌ ত্রুটি: JSON ক্রেডেনশিয়াল বসানো হয়নি। বট লোকালভাবে কাজ করতে পারে কিন্তু ডাটা সেভ হবে না।")
+                # ডামি ডিবি সেট করা হয়েছে
                 db = False
         except Exception as e:
             logger.error(f"❌ Firestore সংযোগে ত্রুটি: {e}")
@@ -79,13 +84,17 @@ async def load_config():
             
             if doc.exists:
                 data = doc.to_dict()
+                # ডেটা টাইপ নিশ্চিত করা
                 GLOBAL_CONFIG['referral_bonus'] = float(data.get('referral_bonus', 0.50))
+                
+                # এডমিন লিস্টে সুপার এডমিন সর্বদা থাকবে
                 saved_admins = data.get('admin_ids', [])
                 if SUPER_ADMIN_CHAT_ID not in saved_admins:
                     saved_admins.append(SUPER_ADMIN_CHAT_ID)
                     await loop.run_in_executor(None, lambda: doc_ref.set({'admin_ids': saved_admins}, merge=True))
                 GLOBAL_CONFIG['admin_ids'] = saved_admins
             else:
+                # প্রথমবার চললে প্রাথমিক কনফিগারেশন সেভ করা 
                 initial_config = {'referral_bonus': 0.50, 'admin_ids': [SUPER_ADMIN_CHAT_ID]}
                 await loop.run_in_executor(None, lambda: doc_ref.set(initial_config))
                 GLOBAL_CONFIG = initial_config
@@ -97,11 +106,12 @@ async def load_config():
 # =================================================================
 
 def is_admin(user_id):
-    if user_id == SUPER_ADMIN_CHAT_ID: return True
+    """চেক করে ইউজার এডমিন কিনা।"""
     return user_id in GLOBAL_CONFIG.get('admin_ids', [])
 
 async def get_user_data(user_id):
-    if not db: return None
+    """ইউজারের ডেটা লোড বা নতুন ইউজার তৈরি করে।"""
+    if not db: return None # DB কানেক্ট না থাকলে ডেটা সেভ হবে না
     loop = asyncio.get_running_loop()
     doc_ref = db.collection('users').document(str(user_id))
     doc = await loop.run_in_executor(None, doc_ref.get)
@@ -120,22 +130,24 @@ async def get_user_data(user_id):
         return new_data
 
 async def update_user(user_id, data, merge=True):
+    """ইউজারের ডেটা আপডেট করে।"""
     if not db: return
     loop = asyncio.get_running_loop()
     doc_ref = db.collection('users').document(str(user_id))
     await loop.run_in_executor(None, lambda: doc_ref.set(data, merge=merge))
 
 # =================================================================
-# === ৪. মেনু এবং কীবোর্ড ===
+# === ৪. মেনু এবং কীবোর্ড (ইউজার ও এডমিন) ===
 # =================================================================
 
+# ইউজারদের জন্য রিপ্লাই কীবোর্ড
 REPLY_KEYBOARD = ReplyKeyboardMarkup([
     ['🔴 Review Generator'], 
     ['📜 তথ্য দেখুন', '💼 কাজ দেখুন'],  
     ['💵 উত্তোলন', '✅ কাজ জমা দিন'], 
 ], resize_keyboard=True)
 
-# সাধারণ মেনু
+# ইউজার মেনুর ডেটা (URL এবং Callback ডেটা সহ)
 MENU_DATA = {
     'main_menu': {
         'text': '👋 স্বাগতম! এটি আমাদের প্রধান মেনু। নিচের যেকোনো বাটনে ক্লিক করুন:',
@@ -170,36 +182,13 @@ MENU_DATA = {
         'buttons': [[{'text': '↩️ ফিরে যান', 'data': 'main_menu'}]]
     },
     'services_menu': {
-        'text': "আমাদের সার্ভিসসমূহ:",
+        'text': "আমাদের সার্ভিসসমূহ:...",
         'buttons': [[{'text': '↩️ ফিরে যান', 'data': 'main_menu'}]]
     }
 }
 
-# অ্যাডমিন ড্যাশবোর্ড কীবোর্ড
-ADMIN_DASHBOARD_KB = InlineKeyboardMarkup([
-    [InlineKeyboardButton("👥 ইউজার পরিসংখ্যান", callback_data="admin_stats")],
-    [InlineKeyboardButton("🎁 বোনাস সেট করুন", callback_data="admin_set_bonus"),
-     InlineKeyboardButton("🚫 ইউজার ব্লক/ডিলিট", callback_data="admin_manage_user")],
-    [InlineKeyboardButton("👮 এডমিন ম্যানেজমেন্ট", callback_data="admin_manage_admin")],
-    [InlineKeyboardButton("❌ মেনু বন্ধ করুন", callback_data="admin_close")]
-])
-
-ADMIN_MANAGE_ADMIN_KB = InlineKeyboardMarkup([
-    [InlineKeyboardButton("➕ এডমিন যুক্ত করুন", callback_data="admin_add_new"),
-     InlineKeyboardButton("➖ এডমিন রিমুভ করুন", callback_data="admin_remove_exist")],
-    [InlineKeyboardButton("📋 এডমিন লিস্ট", callback_data="admin_show_list")],
-    [InlineKeyboardButton("🔙 ব্যাক", callback_data="admin_back_main")]
-])
-
-ADMIN_MANAGE_USER_KB = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🚫 ব্লক ইউজার", callback_data="admin_block_u"),
-     InlineKeyboardButton("✅ আনব্লক ইউজার", callback_data="admin_unblock_u")],
-    [InlineKeyboardButton("🗑 ডিলিট ইউজার", callback_data="admin_delete_u")],
-    [InlineKeyboardButton("💳 ব্যালেন্স অ্যাড", callback_data="admin_add_bal_u")],
-    [InlineKeyboardButton("🔙 ব্যাক", callback_data="admin_back_main")]
-])
-
 def get_inline_keyboard(menu_key):
+    """ইউজারদের জন্য ইনলাইন কীবোর্ড তৈরি করে।"""
     menu = MENU_DATA.get(menu_key)
     if not menu: return None
     keyboard = []
@@ -213,14 +202,41 @@ def get_inline_keyboard(menu_key):
         keyboard.append(new_row)
     return InlineKeyboardMarkup(keyboard)
 
+
+# 🎛 এডমিন ড্যাশবোর্ড কীবোর্ডস (ব্যবহারকারী দেখতে পাবে না)
+ADMIN_DASHBOARD_KB = InlineKeyboardMarkup([
+    [InlineKeyboardButton("📊 ইউজার পরিসংখ্যান", callback_data="admin_stats")],
+    [InlineKeyboardButton("💰 বোনাস সেট করুন", callback_data="admin_set_bonus"),
+     InlineKeyboardButton("👤 ইউজার ম্যানেজমেন্ট", callback_data="admin_manage_user_menu")],
+    [InlineKeyboardButton("👮 এডমিন ম্যানেজমেন্ট", callback_data="admin_manage_admin_menu")],
+    [InlineKeyboardButton("❌ মেনু বন্ধ করুন", callback_data="admin_close")]
+])
+
+ADMIN_MANAGE_ADMIN_KB = InlineKeyboardMarkup([
+    [InlineKeyboardButton("➕ এডমিন যুক্ত করুন", callback_data="admin_add_new"),
+     InlineKeyboardButton("➖ এডমিন রিমুভ করুন", callback_data="admin_remove_exist")],
+    [InlineKeyboardButton("📋 এডমিন লিস্ট দেখুন", callback_data="admin_show_list")],
+    [InlineKeyboardButton("🔙 ব্যাক", callback_data="admin_back_main")]
+])
+
+ADMIN_MANAGE_USER_KB = InlineKeyboardMarkup([
+    [InlineKeyboardButton("🚫 ব্লক ইউজার", callback_data="admin_block_u"),
+     InlineKeyboardButton("✅ আনব্লক ইউজার", callback_data="admin_unblock_u")],
+    [InlineKeyboardButton("🗑 ডিলিট ইউজার", callback_data="admin_delete_u")],
+    [InlineKeyboardButton("💳 ব্যালেন্স অ্যাড (ম্যানুয়াল)", callback_data="admin_add_bal_u")],
+    [InlineKeyboardButton("🔙 ব্যাক", callback_data="admin_back_main")]
+])
+
+
 # =================================================================
-# === ৫. সাধারণ ইউজার হ্যান্ডলার ===
+# === ৫. ইউজার হ্যান্ডলার ও মেনু লজিক ===
 # =================================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
-    if not GLOBAL_CONFIG.get('admin_ids'):
+    # কনফিগারেশন লোড করা নিশ্চিত করা
+    if not GLOBAL_CONFIG.get('admin_ids') or len(GLOBAL_CONFIG['admin_ids']) == 0:
         await load_config()
 
     user_data = await get_user_data(user.id)
@@ -230,28 +246,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ আপনাকে এই বট ব্যবহার করা থেকে ব্লক করা হয়েছে। এডমিনের সাথে যোগাযোগ করুন।")
         return
 
-    # রেফারেল সিস্টেম
+    # রেফারেল সিস্টেম (শুধুমাত্র নতুন ইউজারের জন্য)
     if context.args and user_data.get('total_earned', 0) == 0 and user_data.get('referral_count', 0) == 0:
         try:
-            ref_id = int(context.args[0].replace('ref_', ''))
+            # ref_ID এক্সট্রাক্ট করা
+            ref_id_str = context.args[0].split('_')[-1]
+            ref_id = int(ref_id_str)
+            
             if ref_id != user.id:
                 bonus = GLOBAL_CONFIG.get('referral_bonus', 0.50)
                 ref_data = await get_user_data(ref_id)
                 if ref_data:
+                    # রেফারকারীর ব্যালেন্স বৃদ্ধি 
                     new_bal = ref_data.get('balance', 0) + bonus
                     new_count = ref_data.get('referral_count', 0) + 1
                     new_earned = ref_data.get('total_earned', 0) + bonus
                     await update_user(ref_id, {'balance': new_bal, 'referral_count': new_count, 'total_earned': new_earned})
                     try:
-                        await context.bot.send_message(chat_id=ref_id, text=f"🎉 নতুন রেফারেল! বোনাস: ৳{bonus:.2f}")
+                        await context.bot.send_message(chat_id=ref_id, text=f"🎉 নতুন রেফারেল! আপনার অ্যাকাউন্টে **৳{bonus:.2f}** যোগ হয়েছে।", parse_mode=ParseMode.MARKDOWN)
                     except: pass
-        except ValueError: pass
+        except ValueError: 
+            logger.warning(f"Invalid referral ID format: {context.args[0]}")
+        except Exception as e:
+            logger.error(f"Referral processing error: {e}")
 
+    # মেইন মেনু ডিসপ্লে
     await update.message.reply_text(
-        f"﷽\n\nপ্রিয় {user.full_name}، **আসসালামু আলাইকুম!**\nআমাদের বটে স্বাগতম।",
+        f"﷽\n\nপ্রিয় {user.full_name}। আমাদের বটে স্বাগতম।",
         reply_markup=REPLY_KEYBOARD,
         parse_mode=ParseMode.MARKDOWN
     )
+    # ইনলাইন কীবোর্ড সহ মেইন মেনু
     await update.message.reply_text(
         MENU_DATA['main_menu']['text'],
         reply_markup=get_inline_keyboard('main_menu'),
@@ -259,14 +284,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ইউজারদের মেনু বাটন হ্যান্ডলিং (ক্লিন UI-এর জন্য edit_message_text)।"""
     query = update.callback_query
     await query.answer()
     data = query.data
     
-    # এডমিন প্যানেল হ্যান্ডলিং এখানে হবে না (আলাদা হ্যান্ডলার আছে)
-    if data.startswith("admin_"):
-        return
+    if data.startswith("admin_"): return # এডমিন কলব্যাক এখানে হ্যান্ডল হবে না
 
+    # মূল মেনু পরিবর্তন
     if data in MENU_DATA:
         try:
             await query.edit_message_text(
@@ -274,19 +299,22 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
                 reply_markup=get_inline_keyboard(data),
                 parse_mode=ParseMode.MARKDOWN
             )
-        except: pass
+        except: 
+            # যদি মেসেজ এডিট না করা যায় (যেমন খুব দ্রুত ক্লিক করলে), তবে নতুন মেসেজ পাঠানো যেতে পারে।
+            pass 
         
     elif data == 'check_balance':
         data = await get_user_data(query.from_user.id)
-        msg = f"💰 **ওয়ালেট**\nটাকা: ৳{data.get('balance', 0):.2f}\nরেফার: {data.get('referral_count', 0)} জন"
+        msg = f"💰 **ওয়ালেট**\nটাকা: ৳{data.get('balance', 0):.2f}\nরেফার: {data.get('referral_count', 0)} জন\nমোট আয়: ৳{data.get('total_earned', 0):.2f}"
         try:
             await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_inline_keyboard('info_menu'))
         except: pass
         
     elif data == 'get_referral_link':
         bonus = GLOBAL_CONFIG.get('referral_bonus', 0.50)
+        # সঠিক রেফারেল লিংক তৈরি 
         link = f"https://t.me/{context.bot.username}?start=ref_{query.from_user.id}"
-        msg = f"🔗 **রেফারেল লিংক**\n`{link}`\n\nবোনাস: ৳{bonus:.2f}"
+        msg = f"🔗 **আপনার রেফারেল লিংক**\n`{link}`\n\nপ্রতি রেফার: ৳{bonus:.2f}"
         try:
             await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_inline_keyboard('work_menu'))
         except: pass
@@ -299,67 +327,94 @@ WORK_PHOTO, WORK_DETAILS = range(2)
 WITHDRAW_AMOUNT, WITHDRAW_METHOD, WITHDRAW_NUMBER = range(2, 5)
 
 async def start_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await check_block(update): return ConversationHandler.END
-    await update.message.reply_text("✅ কাজের **স্ক্রীনশট** পাঠান:", reply_markup=ReplyKeyboardRemove())
+    """কাজ জমা দেওয়ার প্রক্রিয়া শুরু করে।"""
+    uid = update.effective_user.id
+    ud = await get_user_data(uid)
+    if ud and ud.get('is_blocked'):
+        await update.message.reply_text("⛔ আপনি ব্লকড।", reply_markup=REPLY_KEYBOARD)
+        return ConversationHandler.END
+
+    await update.message.reply_text("✅ কাজের **স্ক্রীনশট (ছবি)** পাঠান:", reply_markup=ReplyKeyboardRemove())
     return WORK_PHOTO
 
 async def receive_work_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.photo:
         context.user_data['work_photo'] = update.message.photo[-1].file_id
-        await update.message.reply_text("ইমেইল, ডিভাইস নেম ও রিভিউ নেম লিখুন:")
+        await update.message.reply_text("এখন এইগুলো লিখে পাঠান:\n\n১. ইমেইল\n২. ডিভাইস নেম\n৩. রিভিউ নেম")
         return WORK_DETAILS
+    await update.message.reply_text("⚠️ এটি ছবি নয়। দয়া করে **ছবি** পাঠান অথবা `/cancel` লিখুন।")
     return WORK_PHOTO
 
 async def receive_work_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     details = update.message.text
     user = update.effective_user
-    caption = f"📝 **কাজ জমা!**\nইউজার: {user.full_name} (ID: `{user.id}`)\nবিবরণ:\n{details}\n\n⚠️ অনুমোদন করতে এডমিন প্যানেল ব্যবহার করুন বা: `/add_balance {user.id} <amount>`"
+    caption = f"📝 **নতুন কাজ জমা!**\nইউজার: {user.full_name} (ID: `{user.id}`)\nবিবরণ:\n{details}\n\n⚠️ অনুমোদন করতে এডমিন প্যানেল ব্যবহার করুন বা: `/add_balance {user.id} <amount>`"
+    
+    # সুপার এডমিনের কাছে ফরওয়ার্ড
     await context.bot.send_photo(chat_id=SUPER_ADMIN_CHAT_ID, photo=context.user_data['work_photo'], caption=caption, parse_mode=ParseMode.MARKDOWN)
-    await update.message.reply_text("✅ জমা হয়েছে!", reply_markup=REPLY_KEYBOARD)
+    
+    await update.message.reply_text("✅ আপনার কাজ জমা হয়েছে। এডমিন চেক করার পর ব্যালেন্স যোগ হবে।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
 async def start_withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await check_block(update): return ConversationHandler.END
-    user_data = await get_user_data(update.effective_user.id)
-    if user_data.get('balance', 0) < 10:
-        await update.message.reply_text(f"⚠️ মিনিমাম ১০ টাকা দরকার। আছে ৳{user_data.get('balance', 0):.2f}", reply_markup=REPLY_KEYBOARD)
+    """উত্তোলনের প্রক্রিয়া শুরু করে।"""
+    uid = update.effective_user.id
+    ud = await get_user_data(uid)
+    if ud and ud.get('is_blocked'):
+        await update.message.reply_text("⛔ আপনি ব্লকড।", reply_markup=REPLY_KEYBOARD)
         return ConversationHandler.END
-    await update.message.reply_text("💵 কত টাকা তুলবেন?", reply_markup=ReplyKeyboardRemove())
+        
+    balance = ud.get('balance', 0)
+    MIN_WITHDRAW = 10.00
+    
+    if balance < MIN_WITHDRAW:
+        await update.message.reply_text(f"⚠️ মিনিমাম **৳{MIN_WITHDRAW:.2f}** দরকার। আপনার আছে ৳{balance:.2f}", reply_markup=REPLY_KEYBOARD)
+        return ConversationHandler.END
+    
+    await update.message.reply_text(f"💵 আপনার বর্তমান ব্যালেন্স: ৳{balance:.2f}\nকত টাকা তুলবেন?", reply_markup=ReplyKeyboardRemove())
     return WITHDRAW_AMOUNT
 
 async def receive_withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         amount = float(update.message.text)
+        user_data = await get_user_data(update.effective_user.id)
+        balance = user_data.get('balance', 0)
+        
+        if amount > balance:
+            await update.message.reply_text(f"⚠️ আপনার অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স নেই (আছে ৳{balance:.2f})। সঠিক পরিমাণ লিখুন বা `/cancel` করুন।")
+            return WITHDRAW_AMOUNT
+            
         context.user_data['w_amount'] = amount
-        await update.message.reply_text("মাধ্যম (বিকাশ/নগদ):")
+        await update.message.reply_text("মাধ্যম লিখুন (যেমন: বিকাশ/নগদ):")
         return WITHDRAW_METHOD
-    except: return WITHDRAW_AMOUNT
+    except: 
+        await update.message.reply_text("❌ টাকার পরিমাণ সঠিক নয়। দয়া করে শুধু সংখ্যা লিখুন।")
+        return WITHDRAW_AMOUNT
 
 async def receive_withdraw_method(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['w_method'] = update.message.text
-    await update.message.reply_text("নম্বর দিন:")
+    context.user_data['w_method'] = update.message.text.strip()
+    await update.message.reply_text("নম্বর দিন (যে নম্বরে টাকা পাঠাতে হবে):")
     return WITHDRAW_NUMBER
 
 async def receive_withdraw_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = f"💸 **উত্তোলন অনুরোধ!**\nইউজার: `{update.effective_user.id}`\nপরিমাণ: ৳{context.user_data['w_amount']}\nমাধ্যম: {context.user_data['w_method']}\nনম্বর: `{update.message.text}`"
+    user_id = update.effective_user.id
+    
+    # উত্তোলন রিকোয়েস্ট মেসেজ
+    msg = f"💸 **নতুন উত্তোলন অনুরোধ!**\nইউজার ID: `{user_id}`\nপরিমাণ: ৳{context.user_data['w_amount']:.2f}\nমাধ্যম: {context.user_data['w_method']}\nনম্বর: `{update.message.text.strip()}`\n\n⚠️ টাকা পাঠানোর পর ব্যালেন্স কমাতে: `/reduce_balance {user_id} {context.user_data['w_amount']}`"
+    
+    # সুপার এডমিনের কাছে নোটিফিকেশন
     await context.bot.send_message(chat_id=SUPER_ADMIN_CHAT_ID, text=msg, parse_mode=ParseMode.MARKDOWN)
-    await update.message.reply_text("✅ রিকোয়েস্ট পাঠানো হয়েছে।", reply_markup=REPLY_KEYBOARD)
+    
+    await update.message.reply_text("✅ আপনার উত্তোলনের রিকোয়েস্ট পাঠানো হয়েছে। দ্রুত টাকা পাঠানো হবে।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⛔ বাতিল।", reply_markup=REPLY_KEYBOARD)
+    """কনভারসেশন বাতিল করে।"""
+    await update.message.reply_text("⛔ অপারেশন বাতিল করা হলো।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
-async def check_block(update):
-    uid = update.effective_user.id
-    ud = await get_user_data(uid)
-    if ud.get('is_blocked'):
-        await update.message.reply_text("⛔ আপনি ব্লকড।")
-        return True
-    return False
-
 # =================================================================
-# === ৭. প্রফেশনাল এডমিন ড্যাশবোর্ড ===
+# === ৭. প্রফেশনাল এডমিন ড্যাশবোর্ড লজিক ===
 # =================================================================
 
 # এডমিন ইনপুট স্টেটস
@@ -367,225 +422,290 @@ ADMIN_SET_BONUS, ADMIN_ADD_ADMIN, ADMIN_REM_ADMIN = range(7, 10)
 ADMIN_BLOCK_USER, ADMIN_UNBLOCK_USER, ADMIN_DEL_USER, ADMIN_ADD_BAL = range(10, 14)
 
 async def admin_panel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """এডমিন প্যানেল ওপেন করে।"""
-    if not is_admin(update.effective_user.id): return
+    """`/admin` কমান্ডের মাধ্যমে এডমিন প্যানেল ওপেন করে।"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ আপনি এডমিন নন।")
+        return
+
     await update.message.reply_text("🎛 **এডমিন ড্যাশবোর্ড**\nআপনার অপশন নির্বাচন করুন:", reply_markup=ADMIN_DASHBOARD_KB, parse_mode=ParseMode.MARKDOWN)
 
 async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """এডমিন প্যানেলের বাটন হ্যান্ডলিং।"""
+    """এডমিন প্যানেলের বাটন হ্যান্ডলিং (ক্লিন UI এর জন্য সম্পাদনা)।"""
     query = update.callback_query
     await query.answer()
     data = query.data
     
     if not is_admin(query.from_user.id): return
 
+    # --- মেনু ক্লোজ বা ব্যাক হ্যান্ডলিং ---
     if data == "admin_close":
         await query.message.delete()
+        return ConversationHandler.END # যদি কোনো চলমান কনভারসেশন থাকে তা বন্ধ হবে
         
     elif data == "admin_back_main":
-        await query.edit_message_text("🎛 **এডমিন ড্যাশবোর্ড**", reply_markup=ADMIN_DASHBOARD_KB, parse_mode=ParseMode.MARKDOWN)
-        
-    elif data == "admin_stats":
-        # ইউজার কাউন্ট করা
-        loop = asyncio.get_running_loop()
-        users_ref = db.collection('users')
-        # এটি একটি সহজ কাউন্ট (বড় ডেটাবেসে অ্যাগ্রিগেশন কুয়েরি ভালো)
-        docs = await loop.run_in_executor(None, users_ref.stream)
-        count = sum(1 for _ in docs)
-        
-        txt = f"📊 **পরিসংখ্যান**\n\n👥 মোট ইউজার: **{count}** জন\n💰 বর্তমান রেফার বোনাস: **৳{GLOBAL_CONFIG.get('referral_bonus', 0.50)}**"
-        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 ব্যাক", callback_data="admin_back_main")]]), parse_mode=ParseMode.MARKDOWN)
+        try:
+            await query.edit_message_text("🎛 **এডমিন ড্যাশবোর্ড**\nআপনার অপশন নির্বাচন করুন:", reply_markup=ADMIN_DASHBOARD_KB, parse_mode=ParseMode.MARKDOWN)
+        except: pass
+        return ConversationHandler.END
 
-    elif data == "admin_manage_admin":
+    # --- সাবমেনু ওপেন করা ---
+    elif data == "admin_manage_admin_menu":
         await query.edit_message_text("👮 **এডমিন ম্যানেজমেন্ট**\nকি করতে চান?", reply_markup=ADMIN_MANAGE_ADMIN_KB, parse_mode=ParseMode.MARKDOWN)
         
-    elif data == "admin_manage_user":
-        await query.edit_message_text("🚫 **ইউজার ম্যানেজমেন্ট**\nঅপশন সিলেক্ট করুন:", reply_markup=ADMIN_MANAGE_USER_KB, parse_mode=ParseMode.MARKDOWN)
+    elif data == "admin_manage_user_menu":
+        await query.edit_message_text("👤 **ইউজার ম্যানেজমেন্ট**\nঅপশন সিলেক্ট করুন:", reply_markup=ADMIN_MANAGE_USER_KB, parse_mode=ParseMode.MARKDOWN)
 
+    # --- পরিসংখ্যান ---
+    elif data == "admin_stats":
+        # মোট ইউজার কাউন্ট করা ( Firestore Aggregation ব্যবহার না করে সহজ স্ট্রিম)
+        if db:
+            loop = asyncio.get_running_loop()
+            users_ref = db.collection('users')
+            docs = await loop.run_in_executor(None, users_ref.stream)
+            count = sum(1 for _ in docs)
+        else:
+            count = "N/A (DB not connected)"
+        
+        txt = f"📊 **পরিসংখ্যান**\n\n👥 মোট ইউজার: **{count}** জন\n💰 বর্তমান রেফার বোনাস: **৳{GLOBAL_CONFIG.get('referral_bonus', 0.50):.2f}**"
+        
+        # পূর্বের মেনু সম্পাদনা করে নতুন পরিসংখ্যান দেখানো
+        await query.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 ব্যাক", callback_data="admin_back_main")]]), parse_mode=ParseMode.MARKDOWN)
+
+    # --- এডমিন লিস্ট ---
     elif data == "admin_show_list":
         admins = GLOBAL_CONFIG.get('admin_ids', [])
         txt = "📋 **বর্তমান এডমিন লিস্ট:**\n" + "\n".join([f"`{aid}`" for aid in admins])
         await query.edit_message_text(txt, reply_markup=ADMIN_MANAGE_ADMIN_KB, parse_mode=ParseMode.MARKDOWN)
 
-    # --- ইনপুট মোড শুরু ---
+    # --- ইনপুট মোড শুরু (Conversation Entry Points) ---
+    # এখানে মেনু মেসেজটি এডিট না করে একটি নতুন মেসেজ পাঠানো হয় ও রিপ্লাই কীবোর্ড রিমুভ করা হয়।
+    
     elif data == "admin_set_bonus":
-        await query.message.reply_text("🎁 নতুন বোনাস এমাউন্ট লিখুন (যেমন: 1.50):", reply_markup=ReplyKeyboardRemove())
+        await query.message.reply_text("🎁 **রেফারেল বোনাস সেট**\nনতুন বোনাস এমাউন্ট লিখুন (যেমন: `1.50`) বা `/cancel` করুন:", reply_markup=ReplyKeyboardRemove(), parse_mode=ParseMode.MARKDOWN)
         return ADMIN_SET_BONUS
     
     elif data == "admin_add_new":
-        await query.message.reply_text("➕ নতুন এডমিনের Telegram ID লিখুন:", reply_markup=ReplyKeyboardRemove())
+        await query.message.reply_text("➕ **এডমিন যুক্ত করুন**\nনতুন এডমিনের Telegram ID লিখুন বা `/cancel` করুন:", reply_markup=ReplyKeyboardRemove())
         return ADMIN_ADD_ADMIN
         
     elif data == "admin_remove_exist":
-        await query.message.reply_text("➖ যে এডমিনকে রিমুভ করতে চান তার ID লিখুন:", reply_markup=ReplyKeyboardRemove())
+        await query.message.reply_text("➖ **এডমিন রিমুভ করুন**\nযাকে রিমুভ করতে চান তার ID লিখুন বা `/cancel` করুন:", reply_markup=ReplyKeyboardRemove())
         return ADMIN_REM_ADMIN
         
     elif data == "admin_block_u":
-        await query.message.reply_text("🚫 যাকে ব্লক করবেন তার ID লিখুন:", reply_markup=ReplyKeyboardRemove())
+        await query.message.reply_text("🚫 **ইউজার ব্লক**\nযাকে ব্লক করবেন তার ID লিখুন বা `/cancel` করুন:", reply_markup=ReplyKeyboardRemove())
         return ADMIN_BLOCK_USER
         
     elif data == "admin_unblock_u":
-        await query.message.reply_text("✅ যাকে আনব্লক করবেন তার ID লিখুন:", reply_markup=ReplyKeyboardRemove())
+        await query.message.reply_text("✅ **ইউজার আনব্লক**\nযাকে আনব্লক করবেন তার ID লিখুন বা `/cancel` করুন:", reply_markup=ReplyKeyboardRemove())
         return ADMIN_UNBLOCK_USER
         
     elif data == "admin_delete_u":
-        await query.message.reply_text("🗑 যাকে ডিলিট করবেন তার ID লিখুন (সতর্কতা: সব ডেটা মুছে যাবে):", reply_markup=ReplyKeyboardRemove())
+        await query.message.reply_text("🗑 **ইউজার ডিলিট**\nযাকে ডিলিট করবেন তার ID লিখুন (সতর্কতা: সব ডেটা মুছে যাবে!) বা `/cancel` করুন:", reply_markup=ReplyKeyboardRemove())
         return ADMIN_DEL_USER
         
     elif data == "admin_add_bal_u":
-        await query.message.reply_text("💳 ফরম্যাট: `ID Amount`\nউদাহরণ: `123456 50`", parse_mode=ParseMode.MARKDOWN)
+        await query.message.reply_text("💳 **ম্যানুয়াল ব্যালেন্স অ্যাড**\nফরম্যাট: `ID Amount`\nউদাহরণ: `1234567890 50.50` বা `/cancel` করুন।", parse_mode=ParseMode.MARKDOWN, reply_markup=ReplyKeyboardRemove())
         return ADMIN_ADD_BAL
 
-# --- এডমিন ইনপুট হ্যান্ডলারস ---
+    return ConversationHandler.END # অন্যান্য কলব্যাক হ্যান্ডলার শেষ
+
+# --- এডমিন ইনপুট হ্যান্ডলারস --- (সবগুলো ConversationHandler.END দিয়ে শেষ হবে)
 
 async def set_bonus_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """নতুন রেফারেল বোনাস সেভ করে।"""
     try:
         amount = float(update.message.text)
-        loop = asyncio.get_running_loop()
-        ref = db.collection('config').document('global_settings')
-        await loop.run_in_executor(None, lambda: ref.set({'referral_bonus': amount}, merge=True))
+        if db:
+            loop = asyncio.get_running_loop()
+            ref = db.collection('config').document('global_settings')
+            await loop.run_in_executor(None, lambda: ref.set({'referral_bonus': amount}, merge=True))
         GLOBAL_CONFIG['referral_bonus'] = amount
-        await update.message.reply_text(f"✅ বোনাস সেট: ৳{amount}", reply_markup=REPLY_KEYBOARD)
-    except: await update.message.reply_text("❌ ভুল ইনপুট।", reply_markup=REPLY_KEYBOARD)
+        await update.message.reply_text(f"✅ রেফারেল বোনাস সফলভাবে সেট করা হয়েছে: ৳{amount:.2f}", reply_markup=REPLY_KEYBOARD)
+    except: 
+        await update.message.reply_text("❌ ভুল ইনপুট। টাকার পরিমাণ সঠিক সংখ্যায় দিন।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
 async def add_admin_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """নতুন এডমিন যুক্ত করে।"""
     try:
         aid = int(update.message.text)
         admins = GLOBAL_CONFIG.get('admin_ids', [])
         if aid not in admins:
             admins.append(aid)
-            loop = asyncio.get_running_loop()
-            ref = db.collection('config').document('global_settings')
-            await loop.run_in_executor(None, lambda: ref.set({'admin_ids': admins}, merge=True))
+            if db:
+                loop = asyncio.get_running_loop()
+                ref = db.collection('config').document('global_settings')
+                await loop.run_in_executor(None, lambda: ref.set({'admin_ids': admins}, merge=True))
             GLOBAL_CONFIG['admin_ids'] = admins
-            await update.message.reply_text(f"✅ এডমিন যুক্ত: {aid}", reply_markup=REPLY_KEYBOARD)
-        else: await update.message.reply_text("⚠️ ইতিমধ্যে এডমিন।", reply_markup=REPLY_KEYBOARD)
-    except: await update.message.reply_text("❌ ভুল ID।", reply_markup=REPLY_KEYBOARD)
+            await update.message.reply_text(f"✅ এডমিন যুক্ত করা হয়েছে: `{aid}`", reply_markup=REPLY_KEYBOARD, parse_mode=ParseMode.MARKDOWN)
+        else: 
+            await update.message.reply_text("⚠️ এই ID টি ইতিমধ্যে এডমিন।", reply_markup=REPLY_KEYBOARD)
+    except: 
+        await update.message.reply_text("❌ ভুল ID। দয়া করে শুধুমাত্র সংখ্যায় ID দিন।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
 async def del_admin_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """এডমিন রিমুভ করে।"""
     try:
         aid = int(update.message.text)
         if aid == SUPER_ADMIN_CHAT_ID:
             await update.message.reply_text("❌ সুপার এডমিন রিমুভ করা যাবে না।", reply_markup=REPLY_KEYBOARD)
             return ConversationHandler.END
+            
         admins = GLOBAL_CONFIG.get('admin_ids', [])
         if aid in admins:
             admins.remove(aid)
-            loop = asyncio.get_running_loop()
-            ref = db.collection('config').document('global_settings')
-            await loop.run_in_executor(None, lambda: ref.set({'admin_ids': admins}, merge=True))
+            if db:
+                loop = asyncio.get_running_loop()
+                ref = db.collection('config').document('global_settings')
+                await loop.run_in_executor(None, lambda: ref.set({'admin_ids': admins}, merge=True))
             GLOBAL_CONFIG['admin_ids'] = admins
-            await update.message.reply_text(f"✅ এডমিন রিমুভড: {aid}", reply_markup=REPLY_KEYBOARD)
-    except: await update.message.reply_text("❌ ভুল।", reply_markup=REPLY_KEYBOARD)
+            await update.message.reply_text(f"✅ এডমিন রিমুভড: `{aid}`", reply_markup=REPLY_KEYBOARD, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await update.message.reply_text("⚠️ এই ID টি এডমিন লিস্টে নেই।", reply_markup=REPLY_KEYBOARD)
+    except: 
+        await update.message.reply_text("❌ ভুল ID।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
 async def block_user_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ইউজারকে ব্লক করে।"""
     try:
         uid = int(update.message.text)
+        if uid == update.effective_user.id:
+            await update.message.reply_text("❌ নিজেকে ব্লক করা যাবে না।", reply_markup=REPLY_KEYBOARD)
+            return ConversationHandler.END
+            
         await update_user(uid, {'is_blocked': True})
-        await update.message.reply_text(f"🚫 ইউজার {uid} ব্লকড।", reply_markup=REPLY_KEYBOARD)
-    except: await update.message.reply_text("❌ ভুল।", reply_markup=REPLY_KEYBOARD)
+        await update.message.reply_text(f"🚫 ইউজার `{uid}` ব্লক করা হয়েছে।", reply_markup=REPLY_KEYBOARD, parse_mode=ParseMode.MARKDOWN)
+        try: await context.bot.send_message(uid, "⛔ আপনাকে এডমিন দ্বারা ব্লক করা হয়েছে।")
+        except: pass
+    except: 
+        await update.message.reply_text("❌ ভুল ID।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
 async def unblock_user_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ইউজারকে আনব্লক করে।"""
     try:
         uid = int(update.message.text)
         await update_user(uid, {'is_blocked': False})
-        await update.message.reply_text(f"✅ ইউজার {uid} আনব্লকড।", reply_markup=REPLY_KEYBOARD)
-    except: await update.message.reply_text("❌ ভুল।", reply_markup=REPLY_KEYBOARD)
+        await update.message.reply_text(f"✅ ইউজার `{uid}` আনব্লক করা হয়েছে।", reply_markup=REPLY_KEYBOARD, parse_mode=ParseMode.MARKDOWN)
+        try: await context.bot.send_message(uid, "✅ আপনাকে আনব্লক করা হয়েছে। আপনি এখন বট ব্যবহার করতে পারবেন।")
+        except: pass
+    except: 
+        await update.message.reply_text("❌ ভুল ID।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
 async def delete_user_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ইউজারের সব ডেটা ডিলিট করে।"""
     try:
         uid = int(update.message.text)
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: db.collection('users').document(str(uid)).delete())
-        await update.message.reply_text(f"🗑 ইউজার {uid} ডিলিটেড।", reply_markup=REPLY_KEYBOARD)
-    except: await update.message.reply_text("❌ ভুল।", reply_markup=REPLY_KEYBOARD)
+        if db:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: db.collection('users').document(str(uid)).delete())
+        await update.message.reply_text(f"🗑 ইউজার `{uid}` এর সব ডেটা ডিলিট করা হয়েছে।", reply_markup=REPLY_KEYBOARD, parse_mode=ParseMode.MARKDOWN)
+    except: 
+        await update.message.reply_text("❌ ভুল ID বা ডেটাবেস সংযোগ নেই।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
 async def add_bal_user_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ম্যানুয়ালি ইউজার ব্যালেন্স যোগ করে।"""
     try:
         parts = update.message.text.split()
+        if len(parts) != 2: raise ValueError("Invalid format")
+        
         uid = int(parts[0])
         amt = float(parts[1])
+        
         ud = await get_user_data(uid)
-        new_bal = ud.get('balance', 0) + amt
-        await update_user(uid, {'balance': new_bal})
-        await update.message.reply_text(f"💳 ব্যালেন্স অ্যাড। বর্তমান: ৳{new_bal}", reply_markup=REPLY_KEYBOARD)
-        try: await context.bot.send_message(uid, f"🎉 অ্যাকাউন্টে ৳{amt} যোগ হয়েছে।")
+        new_bal = ud.get('balance', 0.00) + amt
+        new_earned = ud.get('total_earned', 0.00) + amt # Total earned এও যোগ করা
+        
+        await update_user(uid, {'balance': new_bal, 'total_earned': new_earned})
+        
+        await update.message.reply_text(f"💳 সফলভাবে ৳{amt:.2f} যোগ করা হয়েছে। ইউজার `{uid}` এর বর্তমান ব্যালেন্স: ৳{new_bal:.2f}", reply_markup=REPLY_KEYBOARD, parse_mode=ParseMode.MARKDOWN)
+        try: await context.bot.send_message(uid, f"🎉 আপনার অ্যাকাউন্টে এডমিন দ্বারা **৳{amt:.2f}** যোগ হয়েছে।")
         except: pass
-    except: await update.message.reply_text("❌ ভুল ফরম্যাট।", reply_markup=REPLY_KEYBOARD)
+    except: 
+        await update.message.reply_text("❌ ভুল ফরম্যাট। সঠিক ফরম্যাট: `ID Amount` (যেমন: `1234567890 50.50`)", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
 
+
 # =================================================================
-# === ৮. মেইন রানার ===
+# === ৮. মেইন রানার ও হ্যান্ডলার সংযোগ ===
 # =================================================================
 
 async def post_init(app):
+    """বট শুরু হওয়ার পর কনফিগারেশন লোড করা।"""
     await load_config()
+    logger.info("Bot configuration loaded and running.")
 
 def main():
     initialize_firestore()
-    if db is False: return
+    # যদি DB সংযোগে গুরুতর সমস্যা হয়, তবুও বট চালু রাখার চেষ্টা করা যেতে পারে, তবে ডেটা সেভ হবে না।
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
-    # হ্যান্ডলারস
-    app.add_handler(CommandHandler("start", start))
-    
-    # মেনু হ্যান্ডলিং
-    app.add_handler(MessageHandler(filters.Regex('^🔴 Review Generator$'), lambda u,c: u.message.reply_text("লিংক:", reply_markup=get_inline_keyboard('main_menu'))))
-    app.add_handler(MessageHandler(filters.Regex('^📜 তথ্য দেখুন$'), lambda u,c: u.message.reply_text("মেনু:", reply_markup=get_inline_keyboard('info_menu'))))
-    app.add_handler(MessageHandler(filters.Regex('^💼 কাজ দেখুন$'), lambda u,c: u.message.reply_text("মেনু:", reply_markup=get_inline_keyboard('work_menu'))))
-    
-    # ইউজার কনভারসেশন
+    # --- ১. ইউজার কনভারসেশন হ্যান্ডলার্স ---
     work_h = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex('^✅ কাজ জমা দিন$'), start_work)],
-        states={WORK_PHOTO: [MessageHandler(filters.PHOTO, receive_work_photo)], WORK_DETAILS: [MessageHandler(filters.TEXT, receive_work_details)]},
-        fallbacks=[CommandHandler('cancel', cancel)]
+        states={
+            WORK_PHOTO: [MessageHandler(filters.PHOTO, receive_work_photo)], 
+            WORK_DETAILS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_work_details)]
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+        per_user=True
     )
     withdraw_h = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex('^💵 উত্তোলন$'), start_withdraw)],
-        states={WITHDRAW_AMOUNT: [MessageHandler(filters.TEXT, receive_withdraw_amount)], WITHDRAW_METHOD: [MessageHandler(filters.TEXT, receive_withdraw_method)], WITHDRAW_NUMBER: [MessageHandler(filters.TEXT, receive_withdraw_number)]},
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-    
-    # এডমিন কনভারসেশন
-    admin_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(admin_callback_handler, pattern="^admin_")],
         states={
-            ADMIN_SET_BONUS: [MessageHandler(filters.TEXT, set_bonus_state)],
-            ADMIN_ADD_ADMIN: [MessageHandler(filters.TEXT, add_admin_state)],
-            ADMIN_REM_ADMIN: [MessageHandler(filters.TEXT, del_admin_state)],
-            ADMIN_BLOCK_USER: [MessageHandler(filters.TEXT, block_user_state)],
-            ADMIN_UNBLOCK_USER: [MessageHandler(filters.TEXT, unblock_user_state)],
-            ADMIN_DEL_USER: [MessageHandler(filters.TEXT, delete_user_state)],
-            ADMIN_ADD_BAL: [MessageHandler(filters.TEXT, add_bal_user_state)],
+            WITHDRAW_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_withdraw_amount)], 
+            WITHDRAW_METHOD: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_withdraw_method)], 
+            WITHDRAW_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_withdraw_number)]
         },
         fallbacks=[CommandHandler('cancel', cancel)],
-        per_chat=True
+        per_user=True
+    )
+    
+    # --- ২. এডমিন কনভারসেশন হ্যান্ডলার্স (বাটন থেকে ইনপুট) ---
+    admin_conv = ConversationHandler(
+        # এন্ট্রি পয়েন্ট: যখন এডমিন প্যানেল থেকে কোনো ইনপুট-ভিত্তিক বাটনে ক্লিক করা হয়
+        entry_points=[CallbackQueryHandler(admin_callback_handler, pattern="^admin_")],
+        states={
+            ADMIN_SET_BONUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_bonus_state)],
+            ADMIN_ADD_ADMIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_admin_state)],
+            ADMIN_REM_ADMIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, del_admin_state)],
+            ADMIN_BLOCK_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, block_user_state)],
+            ADMIN_UNBLOCK_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, unblock_user_state)],
+            ADMIN_DEL_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_user_state)],
+            ADMIN_ADD_BAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_bal_user_state)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+        per_user=True # এডমিন প্যানেলের ইনপুট কনভারসেশন ইউজার-ভিত্তিক
     )
 
+    # --- ৩. মেইন কমান্ড ও মেনু হ্যান্ডলার্স ---
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_panel_command)) # এডমিন প্যানেল ওপেন
+
+    # রিপ্লাই কীবোর্ড বাটনের প্রাথমিক হ্যান্ডলিং
+    app.add_handler(MessageHandler(filters.Regex('^🔴 Review Generator$'), lambda u,c: u.message.reply_text("লিংক নিচে:", reply_markup=get_inline_keyboard('main_menu'))))
+    app.add_handler(MessageHandler(filters.Regex('^📜 তথ্য দেখুন$'), lambda u,c: u.message.reply_text("মেনু নিচে:", reply_markup=get_inline_keyboard('info_menu'))))
+    app.add_handler(MessageHandler(filters.Regex('^💼 কাজ দেখুন$'), lambda u,c: u.message.reply_text("মেনু নিচে:", reply_markup=get_inline_keyboard('work_menu'))))
+    
+    # ইউজার ইনলাইন মেনু (Callback) হ্যান্ডলার
+    app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern="^(?!admin_)"))
+    
+    # কনভারসেশন হ্যান্ডলার যোগ করা
     app.add_handler(work_h)
     app.add_handler(withdraw_h)
     app.add_handler(admin_conv)
     
-    # সাধারণ ইনলাইন হ্যান্ডলার (ইউজার)
-    app.add_handler(CallbackQueryHandler(handle_menu_callback))
-    
-    # এডমিন কমান্ড (প্যানেল ওপেন করার জন্য)
-    app.add_handler(CommandHandler("admin", admin_panel_command))
-    
-    # সাধারণ মেসেজ ফরওয়ার্ডিং
-    async def forward_msg(update, context):
-        if update.message.chat_id != SUPER_ADMIN_CHAT_ID:
-            await update.message.forward(SUPER_ADMIN_CHAT_ID)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_msg))
+    # এডমিন কনভারসেশনের বাইরে থেকে যদি কোনো এডমিন মেসেজ করে, সেটাকে ইনলাইন বাটন হ্যান্ডলার হিসেবে পাঠানো।
+    # এই কমান্ড/মেসেজটি এডমিন কনভারসেশনের fallbacks এর পর এক্সিকিউট হবে।
+    # এই লজিকটি ইউজারদের সাধারণ মেসেজ ফরওয়ার্ড করার জন্য বন্ধ রাখা হলো।
 
-    print("✅ বট চালু হয়েছে...")
+    print("✅ প্রোফেশনাল বট চালু হয়েছে...")
     app.run_polling()
 
 if __name__ == "__main__":
