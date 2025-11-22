@@ -1,7 +1,9 @@
-import logging
+import os 
 import time
 import json
 import asyncio
+import logging
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.constants import ParseMode
 from telegram.ext import (
@@ -14,28 +16,35 @@ try:
     import firebase_admin
     from firebase_admin import credentials, firestore
 except ImportError:
-    # Replit-এ সাধারণত এই লাইব্রেরি ইনস্টল করা থাকে।
-    # যদি না থাকে তবে requirements.txt চেক করুন।
+    # এটি লোকাল মেশিনে ইনস্টল করা না থাকলে ত্রুটি দেখাবে।
     print("⚠️ 'firebase-admin' লাইব্রেরি ইনস্টল করা নেই।")
 
 # =================================================================
-# === ১. কনফিগারেশন ===
+# === ১. কনফিগারেশন (এনভায়রনমেন্ট ভেরিয়েবলস থেকে লোড) ===
 # =================================================================
 
-# ১. বট টোকেন (আপনার টোকেন এখানে বসান)
-TOKEN = '8333558740:AAHoXqa8V0E-NAYxbY' 
+logger = logging.getLogger(__name__)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# ২. সুপার এডমিন চ্যাট আইডি (আপনার Telegram ID)
-SUPER_ADMIN_CHAT_ID = 7870088579 
+# 💡 ১. বট টোকেন (এনভায়রনমেন্ট ভেরিয়েবল থেকে লোড)
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN') 
+if not TOKEN:
+    logger.critical("❌ FATAL: TELEGRAM_BOT_TOKEN লোড হতে ব্যর্থ। বট চালু হচ্ছে না।")
+
+# 💡 ২. সুপার এডমিন চ্যাট আইডি (এনভায়রনমেন্ট ভেরিয়েবল থেকে লোড)
+try:
+    # এনভায়রনমেন্ট ভেরিয়েবল সবসময় স্ট্রিং হিসেবে লোড হয়, তাই এটিকে ইন্টিজারে রূপান্তর করা প্রয়োজন।
+    SUPER_ADMIN_CHAT_ID = int(os.environ.get('SUPER_ADMIN_CHAT_ID', '0'))
+except (TypeError, ValueError):
+    SUPER_ADMIN_CHAT_ID = 0 
+    logger.error("❌ ত্রুটি: SUPER_ADMIN_CHAT_ID এনভায়রনমেন্ট ভেরিয়েবলে সঠিক সংখ্যা নেই।")
 
 # ৩. এডমিন ইউজারনেম (যোগাযোগের জন্য)
 ADMIN_USERNAME = 'AfMdshakil'
 
-# 🟢🟢🟢 ৪. ফায়ারবেস ক্রেডেনশিয়াল (এখানে আপনার JSON পেস্ট করুন) 🟢🟢🟢
-FIREBASE_CREDENTIALS_JSON = """
-{ "type": "service_account", "project_id": "PROJECT_ID", "private_key_id": "KEY_ID", "private_key": "-----BEGIN PRIVATE KEY-----\nPRIVATE_KEY\n-----END PRIVATE KEY-----\n", "client_email": "SERVICE_ACCOUNT_EMAIL", "client_id": "CLIENT_ID", "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://www.googleapis.com/oauth2/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs", "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/SERVICE_ACCOUNT_EMAIL" }
-"""
-# 🟢🟢🟢 পেস্ট করা শেষ হলে কোড রান করুন 🟢🟢🟢
+# 💡 ৪. ফায়ারবেস ক্রেডেনশিয়াল JSON (এনভায়রনমেন্ট ভেরিয়েবল থেকে লোড)
+# এটি আপনার ডিপ্লয়মেন্ট প্ল্যাটফর্মের (Render/Heroku) ভেরিয়েবলে সেট করা JSON স্ট্রিং হবে।
+FIREBASE_CREDENTIALS_JSON = os.environ.get('FIREBASE_CREDENTIALS_JSON', '{}')
 
 
 # =================================================================
@@ -43,10 +52,6 @@ FIREBASE_CREDENTIALS_JSON = """
 # =================================================================
 
 db = None 
-logger = logging.getLogger(__name__)
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-# কনফিগারেশন ডিফল্ট ভ্যালু 
 GLOBAL_CONFIG = {
     'referral_bonus': 0.50, 
     'admin_ids': [SUPER_ADMIN_CHAT_ID]
@@ -57,29 +62,38 @@ def initialize_firestore():
     global db
     if db is None:
         try:
+            # JSON স্ট্রিং লোড করা হচ্ছে 
             cred_dict = json.loads(FIREBASE_CREDENTIALS_JSON)
-            # ডামি ক্রেডেনশিয়াল চেক
-            if 'project_id' in cred_dict and 'PROJECT_ID' not in cred_dict['project_id']:
+            
+            # ডামি ক্রেডেনশিয়াল চেক: যদি 'PROJECT_ID' বা 'KEY_ID' ডিফল্ট থাকে তবে সংযোগ করা হবে না।
+            is_placeholder = ('project_id' in cred_dict and cred_dict['project_id'] == 'PROJECT_ID')
+            
+            if cred_dict and not is_placeholder:
                 cred = credentials.Certificate(cred_dict)
                 if not firebase_admin._apps:
                     firebase_admin.initialize_app(cred)
                 db = firestore.client()
                 logger.info("✅ Firestore সফলভাবে সংযুক্ত হয়েছে।")
             else:
-                logger.error("❌ ত্রুটি: JSON ক্রেডেনশিয়াল বসানো হয়নি। বট লোকালভাবে কাজ করতে পারে কিন্তু ডাটা সেভ হবে না।")
+                logger.error("❌ ত্রুটি: JSON ক্রেডেনশিয়াল লোড করা হয়নি বা এটি ডিফল্ট প্লেসহোল্ডার। বট ডাটাবেস ছাড়া চলছে।")
                 # ডামি ডিবি সেট করা হয়েছে
                 db = False
+        except json.JSONDecodeError:
+            logger.error("❌ ত্রুটি: FIREBASE_CREDENTIALS_JSON ভেরিয়েবলটি সঠিক JSON ফরম্যাটে নেই।")
+            db = False
         except Exception as e:
-            logger.error(f"❌ Firestore সংযোগে ত্রুটি: {e}")
+            logger.error(f"❌ Firestore সংযোগে গুরুতর ত্রুটি: {e}")
             db = False 
 
 async def load_config():
     """ডাটাবেস থেকে কনফিগারেশন লোড করে।"""
     global GLOBAL_CONFIG
+    # DB কানেক্ট না থাকলে লোড করা যাবে না
     if db:
         try:
             loop = asyncio.get_running_loop()
             doc_ref = db.collection('config').document('global_settings')
+            # Firestore অপারেশন এক্সিকিউটর-এ রান করানো হলো
             doc = await loop.run_in_executor(None, doc_ref.get)
             
             if doc.exists:
@@ -90,13 +104,17 @@ async def load_config():
                 # এডমিন লিস্টে সুপার এডমিন সর্বদা থাকবে
                 saved_admins = data.get('admin_ids', [])
                 if SUPER_ADMIN_CHAT_ID not in saved_admins:
-                    saved_admins.append(SUPER_ADMIN_CHAT_ID)
-                    await loop.run_in_executor(None, lambda: doc_ref.set({'admin_ids': saved_admins}, merge=True))
+                    # নিশ্চিত করা যে SUPER_ADMIN_CHAT_ID একটি বৈধ ID (0 না)
+                    if SUPER_ADMIN_CHAT_ID != 0:
+                         saved_admins.append(SUPER_ADMIN_CHAT_ID)
+                         await loop.run_in_executor(None, lambda: doc_ref.set({'admin_ids': saved_admins}, merge=True))
+                         
                 GLOBAL_CONFIG['admin_ids'] = saved_admins
             else:
                 # প্রথমবার চললে প্রাথমিক কনফিগারেশন সেভ করা 
                 initial_config = {'referral_bonus': 0.50, 'admin_ids': [SUPER_ADMIN_CHAT_ID]}
-                await loop.run_in_executor(None, lambda: doc_ref.set(initial_config))
+                if SUPER_ADMIN_CHAT_ID != 0:
+                    await loop.run_in_executor(None, lambda: doc_ref.set(initial_config))
                 GLOBAL_CONFIG = initial_config
         except Exception as e:
             logger.error(f"⚠️ কনফিগারেশন লোড ব্যর্থ: {e}")
@@ -236,13 +254,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     # কনফিগারেশন লোড করা নিশ্চিত করা
-    if not GLOBAL_CONFIG.get('admin_ids') or len(GLOBAL_CONFIG['admin_ids']) == 0:
+    if not GLOBAL_CONFIG.get('admin_ids') or len(GLOBAL_CONFIG['admin_ids']) <= 1: # ১ বা তার কম হলে লোড করা
         await load_config()
 
     user_data = await get_user_data(user.id)
     
     # ব্লক চেক
-    if user_data.get('is_blocked', False):
+    if user_data and user_data.get('is_blocked', False):
         await update.message.reply_text("⛔ আপনাকে এই বট ব্যবহার করা থেকে ব্লক করা হয়েছে। এডমিনের সাথে যোগাযোগ করুন।")
         return
 
@@ -351,7 +369,8 @@ async def receive_work_details(update: Update, context: ContextTypes.DEFAULT_TYP
     caption = f"📝 **নতুন কাজ জমা!**\nইউজার: {user.full_name} (ID: `{user.id}`)\nবিবরণ:\n{details}\n\n⚠️ অনুমোদন করতে এডমিন প্যানেল ব্যবহার করুন বা: `/add_balance {user.id} <amount>`"
     
     # সুপার এডমিনের কাছে ফরওয়ার্ড
-    await context.bot.send_photo(chat_id=SUPER_ADMIN_CHAT_ID, photo=context.user_data['work_photo'], caption=caption, parse_mode=ParseMode.MARKDOWN)
+    if SUPER_ADMIN_CHAT_ID != 0:
+        await context.bot.send_photo(chat_id=SUPER_ADMIN_CHAT_ID, photo=context.user_data['work_photo'], caption=caption, parse_mode=ParseMode.MARKDOWN)
     
     await update.message.reply_text("✅ আপনার কাজ জমা হয়েছে। এডমিন চেক করার পর ব্যালেন্স যোগ হবে।", reply_markup=REPLY_KEYBOARD)
     return ConversationHandler.END
@@ -403,9 +422,12 @@ async def receive_withdraw_number(update: Update, context: ContextTypes.DEFAULT_
     msg = f"💸 **নতুন উত্তোলন অনুরোধ!**\nইউজার ID: `{user_id}`\nপরিমাণ: ৳{context.user_data['w_amount']:.2f}\nমাধ্যম: {context.user_data['w_method']}\nনম্বর: `{update.message.text.strip()}`\n\n⚠️ টাকা পাঠানোর পর ব্যালেন্স কমাতে: `/reduce_balance {user_id} {context.user_data['w_amount']}`"
     
     # সুপার এডমিনের কাছে নোটিফিকেশন
-    await context.bot.send_message(chat_id=SUPER_ADMIN_CHAT_ID, text=msg, parse_mode=ParseMode.MARKDOWN)
+    if SUPER_ADMIN_CHAT_ID != 0:
+        await context.bot.send_message(chat_id=SUPER_ADMIN_CHAT_ID, text=msg, parse_mode=ParseMode.MARKDOWN)
     
     await update.message.reply_text("✅ আপনার উত্তোলনের রিকোয়েস্ট পাঠানো হয়েছে। দ্রুত টাকা পাঠানো হবে।", reply_markup=REPLY_KEYBOARD)
+    
+    # ব্যালেন্স কমানোর লজিক: উত্তোলন অনুরোধের পর ব্যালেন্স কমানো উচিত নয়, এডমিন ম্যানুয়ালি টাকা পাঠানোর পর কমাবেন।
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -457,11 +479,12 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     # --- পরিসংখ্যান ---
     elif data == "admin_stats":
-        # মোট ইউজার কাউন্ট করা ( Firestore Aggregation ব্যবহার না করে সহজ স্ট্রিম)
+        # মোট ইউজার কাউন্ট করা 
         if db:
             loop = asyncio.get_running_loop()
             users_ref = db.collection('users')
-            docs = await loop.run_in_executor(None, users_ref.stream)
+            # এটি একটি ধীর প্রক্রিয়া হতে পারে, কিন্তু সহজ কাউন্টিংয়ের জন্য ঠিক আছে
+            docs = await loop.run_in_executor(None, users_ref.stream) 
             count = sum(1 for _ in docs)
         else:
             count = "N/A (DB not connected)"
@@ -642,7 +665,11 @@ async def post_init(app):
 
 def main():
     initialize_firestore()
-    # যদি DB সংযোগে গুরুতর সমস্যা হয়, তবুও বট চালু রাখার চেষ্টা করা যেতে পারে, তবে ডেটা সেভ হবে না।
+    
+    # টোকেন লোড হয়েছে কিনা নিশ্চিত করা
+    if not TOKEN:
+        logger.critical("❌ FATAL: বট টোকেন এনভায়রনমেন্ট ভেরিয়েবল (TELEGRAM_BOT_TOKEN) থেকে লোড হতে পারেনি। বট চালু হচ্ছে না।")
+        return
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
 
@@ -701,11 +728,7 @@ def main():
     app.add_handler(withdraw_h)
     app.add_handler(admin_conv)
     
-    # এডমিন কনভারসেশনের বাইরে থেকে যদি কোনো এডমিন মেসেজ করে, সেটাকে ইনলাইন বাটন হ্যান্ডলার হিসেবে পাঠানো।
-    # এই কমান্ড/মেসেজটি এডমিন কনভারসেশনের fallbacks এর পর এক্সিকিউট হবে।
-    # এই লজিকটি ইউজারদের সাধারণ মেসেজ ফরওয়ার্ড করার জন্য বন্ধ রাখা হলো।
-
-    print("✅ প্রোফেশনাল বট চালু হয়েছে...")
+    logger.info("✅ প্রোফেশনাল বট চালু হচ্ছে...")
     app.run_polling()
 
 if __name__ == "__main__":
